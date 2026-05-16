@@ -1,0 +1,10 @@
+wrds
+pandas
+numpy
+scikit-learn
+matplotlib
+scipy
+plotly
+hmmlearn
+ipykernel
+anthropic
