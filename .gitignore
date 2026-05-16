@@ -17,3 +17,8 @@ Thumbs.db
 
 # Private project docs
 private/
+
+data/raw/
+data/removed/
+# data/output/ ← intentionally NOT ignored
+# Raw data sourced manually from Investing.com. Cleaned outputs are included for reproducibility
