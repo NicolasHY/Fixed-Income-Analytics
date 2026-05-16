@@ -8,3 +8,5 @@ plotly
 hmmlearn
 ipykernel
 anthropic
+google-genai
+missingno
