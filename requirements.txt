@@ -10,3 +10,6 @@ ipykernel
 anthropic
 google-genai
 missingno
+pytest
+streamlit
+pyyaml

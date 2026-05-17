@@ -1,0 +1,27 @@
+[
+  {
+    "check": "All pipeline steps passed",
+    "status": "GREEN",
+    "detail": "All 5 steps OK"
+  },
+  {
+    "check": "Data freshness",
+    "status": "YELLOW",
+    "detail": "Latest data: 2026-04-30 (17 days ago)"
+  },
+  {
+    "check": "Runtime within bounds",
+    "status": "GREEN",
+    "detail": "Slowest step: 1_data_load (0.11s)"
+  },
+  {
+    "check": "VaR 95% breach rate (250d)",
+    "status": "GREEN",
+    "detail": "4.8% (target: 5%, tolerance: 3-8%)"
+  },
+  {
+    "check": "Regime stability (20d)",
+    "status": "GREEN",
+    "detail": "2 transitions in last 20 trading days"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "step": "1_data_load",
+    "timestamp": "2026-05-17 00:15:58.063453",
+    "status": "success",
+    "runtime_seconds": 0.11,
+    "output_shape": 7,
+    "error": null
+  },
+  {
+    "step": "2_pca",
+    "timestamp": "2026-05-17 00:15:58.169449",
+    "status": "success",
+    "runtime_seconds": 0.01,
+    "output_shape": 7,
+    "error": null
+  },
+  {
+    "step": "3_var",
+    "timestamp": "2026-05-17 00:15:58.181999",
+    "status": "success",
+    "runtime_seconds": 0.0,
+    "output_shape": 2,
+    "error": null
+  },
+  {
+    "step": "4_alerts",
+    "timestamp": "2026-05-17 00:15:58.182992",
+    "status": "success",
+    "runtime_seconds": 0.0,
+    "output_shape": 1,
+    "error": null
+  },
+  {
+    "step": "5_briefing",
+    "timestamp": "2026-05-17 00:15:58.182992",
+    "status": "success",
+    "runtime_seconds": 0.01,
+    "output_shape": 1,
+    "error": null
+  }
+]

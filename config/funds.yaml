@@ -1,0 +1,135 @@
+# ============================================================================
+# Company EM Fixed Income Intelligence Platform — Configuration
+# ============================================================================
+# Centralized metadata for the analytical pipeline.
+# All country/fund/threshold parameters are defined here to keep
+# the codebase config-driven and easily extensible.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Country universe
+# ---------------------------------------------------------------------------
+countries:
+  local_currency:
+    - Brazil
+    - Mexico
+    - South Africa
+    - Poland
+  hard_currency:
+    - Colombia
+    - Hungary
+    - Romania
+
+# Maturities to exclude due to poor data coverage
+excluded_series:
+  Colombia: ["2Y"]
+  Hungary: ["20Y"]
+  Romania: ["1Y"]
+
+# ---------------------------------------------------------------------------
+# LC Fund proxy parameters (Company L Bonds Emerging Markets Sust. — PLBEMSA)
+# ---------------------------------------------------------------------------
+lc_fund:
+  name: "Company L Bonds Emerging Markets Sustainable"
+  ticker: "PLBEMSA"
+  weights:
+    Brazil: 10.1
+    Mexico: 8.8
+    South Africa: 7.8
+    Poland: 6.6
+  effective_duration: 5.22
+  benchmark_maturity: "5Y"
+
+# ---------------------------------------------------------------------------
+# VaR engine parameters
+# ---------------------------------------------------------------------------
+var:
+  confidence_levels: [0.95, 0.99]
+  historical_windows:
+    1Y: 252
+    2Y: 504
+    3Y: 756
+  monte_carlo:
+    n_simulations: 10000
+    random_seed: 42
+    copula_dof: 5  # Student-t copula degrees of freedom
+
+# ---------------------------------------------------------------------------
+# PCA parameters
+# ---------------------------------------------------------------------------
+pca:
+  n_components: 3
+  component_labels:
+    - "level"
+    - "slope"
+    - "curve"
+
+# ---------------------------------------------------------------------------
+# Regime detection parameters
+# ---------------------------------------------------------------------------
+regime:
+  gmm:
+    max_components: 6
+    covariance_type: "full"
+    n_init: 10
+    random_state: 42
+  labels:
+    0: "Normal"
+    1: "EM Crisis"
+    2: "Rate Shock"
+    3: "Risk-On"
+  colors:
+    Normal: "#2ecc71"
+    EM Crisis: "#e74c3c"
+    Rate Shock: "#e67e22"
+    Risk-On: "#3498db"
+
+# ---------------------------------------------------------------------------
+# Alert engine thresholds
+# ---------------------------------------------------------------------------
+alerts:
+  pc_zscore_threshold: 3.0       # z-score above which PC alert fires
+  pc_zscore_high_threshold: 4.0  # z-score for "high" severity
+  vol_percentile: 0.90           # trailing 1Y percentile for vol spike
+  vol_trailing_window: 252       # days for trailing vol window
+  curve_zscore_threshold: 3.0    # z-score for country curve outlier
+  curve_zscore_high_threshold: 4.0
+  curve_rolling_window: 60       # days for rolling mean/std
+
+# ---------------------------------------------------------------------------
+# Macro events (for annotation and context)
+# ---------------------------------------------------------------------------
+macro_events:
+  "2020-03-11": "COVID"
+  "2022-02-24": "Russia invades Ukraine"
+  "2022-09-26": "UK gilt crisis"
+  "2023-03-10": "SVB collapse"
+  "2023-10-07": "Hamas attack"
+  "2024-11-05": "Trump elected"
+
+# ---------------------------------------------------------------------------
+# Pipeline health thresholds
+# ---------------------------------------------------------------------------
+pipeline:
+  stale_data_hours: 48
+  max_runtime_seconds: 300
+  var_breach_alert_rate: 0.10  # flag if >10% breach rate
+
+# ---------------------------------------------------------------------------
+# LLM briefing configuration
+# ---------------------------------------------------------------------------
+briefing:
+  model: "gemini-2.0-flash"
+  api_key_path: "private/gemini_key.txt"
+  system_prompt: |
+    You are a senior EM Fixed Income analyst at the Company.
+    Given the following daily data for the EM Local Currency bond fund, produce a concise
+    briefing for the portfolio manager.
+    Structure: (1) regime status, (2) notable country-level moves, (3) VaR changes,
+    (4) any alerts. Be precise. No filler. Use basis points for yield changes.
+  showcase_dates:
+    - "2022-03-18"
+    - "2022-09-23"
+    - "2023-06-15"
+    - "2024-09-18"
+    - "2025-01-22"
