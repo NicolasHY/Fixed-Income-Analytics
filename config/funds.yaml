@@ -118,36 +118,42 @@ pipeline:
 # ---------------------------------------------------------------------------
 # Multi-portfolio definitions
 # ---------------------------------------------------------------------------
-# Countries are taken from data/raw/ in alphabetical order:
-# Brazil, Colombia, Hungary, Mexico, Poland, Romania, South Africa
-# Weights are normalised to sum to 1 internally; raw values below are %.
+# Weights are sourced from Research_Notes_2026-05-13.md (Bloomberg PORT,
+# holdings/allocations as of 10/31/2025). Only countries present in data/raw/
+# are included; off-universe holdings (Jordan, Montenegro, Bahamas, Indonesia,
+# etc.) are omitted. Weights are raw % from the fund report and are normalised
+# to sum to 1 internally — sums need not equal 100.
 portfolios:
   - name: "EM Hard Currency Sustainable"
     id: "portfolio_1"
     aum_eur: 14_970_000
+    # HC fund (DPBEMHF LX): top geographic allocation for Colombia/Hungary/Romania;
+    # LC-universe countries proxied by their single largest top-10 holding weight.
     weights:
-      Brazil: 14.286
-      Colombia: 14.286
-      Hungary: 14.286
-      Mexico: 14.286
-      Poland: 14.286
-      Romania: 14.286
-      South Africa: 14.286
-    effective_duration: 5.22
+      Brazil: 4.16          # BRAZIL 6 5/8 03/15/35 (top 10)
+      Colombia: 11.00       # top geographic allocation
+      Hungary: 9.72         # top geographic allocation
+      Mexico: 3.33          # MEX 4 1/2 03/19/34 (top 10)
+      Poland: 4.98          # POLAND 5 3/4 11/16/32 (top 10)
+      Romania: 8.39         # top geographic allocation
+      South Africa: 4.32    # SOAF 5 3/4 09/30/49 (top 10)
+    effective_duration: 6.89   # OAS effective duration per Bloomberg PORT
     benchmark_maturity: "5Y"
 
   - name: "EM Local Currency Sustainable"
     id: "portfolio_2"
     aum_eur: 5_160_000_000
+    # LC fund (PLBEMSA LX): top geographic allocation for Brazil/Mexico/SA/Poland;
+    # Hungary/Romania from top-10 holdings. Colombia is absent from the LC fund
+    # (not mentioned in geographic allocation nor top-10 holdings).
     weights:
-      Brazil: 10.0
-      Colombia: 10.0
-      Hungary: 10.0
-      Mexico: 10.0
-      Poland: 10.0
-      Romania: 10.0
-      South Africa: 40.0
-    effective_duration: 5.22
+      Brazil: 10.12         # top geographic allocation
+      Hungary: 2.23         # HGB 2 1/4 04/20/33 (top 10)
+      Mexico: 8.76          # top geographic allocation
+      Poland: 6.63          # top geographic allocation
+      Romania: 1.64         # ROMGB 6.85 07/29/30 (top 10)
+      South Africa: 7.75    # top geographic allocation
+    effective_duration: 5.22   # OAS effective duration per Bloomberg PORT
     benchmark_maturity: "5Y"
 
 # ---------------------------------------------------------------------------
