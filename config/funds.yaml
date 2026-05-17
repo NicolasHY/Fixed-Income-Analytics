@@ -116,8 +116,46 @@ pipeline:
   var_breach_alert_rate: 0.10  # flag if >10% breach rate
 
 # ---------------------------------------------------------------------------
+# Multi-portfolio definitions
+# ---------------------------------------------------------------------------
+# Countries are taken from data/raw/ in alphabetical order:
+# Brazil, Colombia, Hungary, Mexico, Poland, Romania, South Africa
+# Weights are normalised to sum to 1 internally; raw values below are %.
+portfolios:
+  - name: "Portfolio 1 — Equal Weight"
+    id: "portfolio_1"
+    weights:
+      Brazil: 14.286
+      Colombia: 14.286
+      Hungary: 14.286
+      Mexico: 14.286
+      Poland: 14.286
+      Romania: 14.286
+      South Africa: 14.286
+    effective_duration: 5.22
+    benchmark_maturity: "5Y"
+
+  - name: "Portfolio 2 — Concentrated"
+    id: "portfolio_2"
+    weights:
+      Brazil: 10.0
+      Colombia: 10.0
+      Hungary: 10.0
+      Mexico: 10.0
+      Poland: 10.0
+      Romania: 10.0
+      South Africa: 40.0
+    effective_duration: 5.22
+    benchmark_maturity: "5Y"
+
+# ---------------------------------------------------------------------------
 # LLM briefing configuration
 # ---------------------------------------------------------------------------
+fred:
+  key_path: "private/fred_key.txt"
+  output_path: "data/output/risk_free_rates.csv"
+  fetch_start: "2018-01-01"
+
 briefing:
   model: "gemini-2.0-flash"
   api_key_path: "private/gemini_key.txt"

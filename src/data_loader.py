@@ -229,3 +229,87 @@ def build_portfolio_pnl(
         len(pnl), pnl.mean() * 100, pnl.std() * 100,
     )
     return pnl, proxy_dy
+
+
+def build_portfolio_pnl_from_def(
+    change_dfs: dict[str, pd.DataFrame],
+    portfolio_def: dict,
+) -> tuple[pd.Series, pd.DataFrame]:
+    """
+    Build P&L proxy for a portfolio defined by an explicit dict (from the
+    ``portfolios`` section of funds.yaml).
+
+    Parameters
+    ----------
+    change_dfs : dict[str, pd.DataFrame]
+        Yield-change DataFrames keyed by country name.
+    portfolio_def : dict
+        One entry from ``config["portfolios"]``. Must contain ``weights``,
+        ``effective_duration``, and ``benchmark_maturity``.
+
+    Returns
+    -------
+    pnl : pd.Series
+        Daily P&L as a fraction.
+    proxy_dy : pd.DataFrame
+        Per-country yield change series used.
+    """
+    raw_weights: dict[str, float] = portfolio_def["weights"]
+    D_eff: float = portfolio_def["effective_duration"]
+    mat: str = portfolio_def["benchmark_maturity"]
+
+    total = sum(raw_weights.values())
+    weights = {k: v / total for k, v in raw_weights.items()}
+
+    proxy_dy = pd.DataFrame({
+        country: change_dfs[country][mat]
+        for country in weights
+        if country in change_dfs and mat in change_dfs[country].columns
+    }).dropna()
+
+    w_vec = np.array([weights[c] for c in proxy_dy.columns])
+    portfolio_dy = proxy_dy @ w_vec
+    pnl = -D_eff * (portfolio_dy / 100)
+
+    logger.info(
+        "%s P&L: %d obs, mean=%.4f%%, std=%.4f%%",
+        portfolio_def.get("name", "portfolio"),
+        len(pnl), pnl.mean() * 100, pnl.std() * 100,
+    )
+    return pnl, proxy_dy
+
+
+def load_all_countries_combined(
+    config: dict,
+    data_dir: str | Path = "data/raw",
+) -> dict[str, pd.DataFrame]:
+    """
+    Load yield changes for every country present in data/raw, spanning both
+    the local-currency and hard-currency universes defined in config.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        {country_name: yield_changes_df}
+    """
+    all_countries = (
+        config["countries"]["local_currency"]
+        + config["countries"]["hard_currency"]
+    )
+    excluded = config.get("excluded_series", {})
+    change_dfs: dict[str, pd.DataFrame] = {}
+
+    for country in all_countries:
+        try:
+            change_dfs[country] = load_yield_changes(
+                country,
+                data_dir=data_dir,
+                excluded_maturities=excluded.get(country),
+            )
+        except FileNotFoundError as e:
+            logger.warning("Skipping %s: %s", country, e)
+
+    if not change_dfs:
+        raise RuntimeError("No country data could be loaded. Check data/raw/ directory.")
+
+    return change_dfs

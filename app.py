@@ -7,9 +7,17 @@ Run:  streamlit run app.py
 
 import json
 import os
+import sys
 import streamlit as st
 import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
 from pathlib import Path
+from scipy.stats import norm
+
+sys.path.insert(0, str(Path(__file__).parent))
+from src.data_loader import load_config, load_all_countries_combined, build_portfolio_pnl_from_def, load_country_yields
+from src.risk_free import load_risk_free_rates, align_rf_to_pnl
 
 st.set_page_config(
     page_title="EM FI Intelligence",
@@ -258,7 +266,7 @@ with st.sidebar:
     st.markdown("<div style='font-size:0.72rem; color:#4a6a85; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px;'>Navigation</div>", unsafe_allow_html=True)
     page = st.radio(
         "",
-        ["Pipeline Health", "Data Load", "PCA & Regime", "VaR Engine", "Alert History", "Daily Briefings"],
+        ["Pipeline Health", "Data Load", "PCA & Regime", "VaR Engine", "Portfolios", "Alert History", "Daily Briefings"],
         label_visibility="collapsed",
     )
 
@@ -528,6 +536,633 @@ elif page == "Daily Briefings":
             """, unsafe_allow_html=True)
             st.markdown(briefings[selected])
             st.markdown("</div>", unsafe_allow_html=True)
+
+# ── Portfolios ────────────────────────────────────────────────────────────────
+elif page == "Portfolios":
+
+    @st.cache_data(show_spinner="Loading yield data…")
+    def _load_portfolio_data():
+        cfg = load_config()
+        change_dfs = load_all_countries_combined(cfg, data_dir="data/raw")
+        results = []
+        for pdef in cfg["portfolios"]:
+            pnl, proxy_dy = build_portfolio_pnl_from_def(change_dfs, pdef)
+            results.append({"def": pdef, "pnl": pnl, "proxy_dy": proxy_dy})
+        return results
+
+    PORT_COLORS = ["#1b3a5c", "#e67e22"]
+
+    try:
+        portfolio_results = _load_portfolio_data()
+    except Exception as exc:
+        st.error(f"Could not load portfolio data: {exc}")
+        st.stop()
+
+    p1 = portfolio_results[0]
+    p2 = portfolio_results[1]
+
+    tab_weights, tab_perf, tab_var, tab_compare, tab_risk = st.tabs(
+        ["Weights", "Cumulative Performance", "VaR", "P&L Comparison", "Risk Statistics"]
+    )
+
+    # ── Weights ──────────────────────────────────────────────────────────────
+    with tab_weights:
+        countries = list(p1["def"]["weights"].keys())
+        raw1 = [p1["def"]["weights"][c] for c in countries]
+        raw2 = [p2["def"]["weights"][c] for c in countries]
+        tot1, tot2 = sum(raw1), sum(raw2)
+        pct1 = [v / tot1 * 100 for v in raw1]
+        pct2 = [v / tot2 * 100 for v in raw2]
+
+        fig_w = go.Figure()
+        fig_w.add_trace(go.Bar(
+            name=p1["def"]["name"], x=countries, y=pct1,
+            marker_color=PORT_COLORS[0], text=[f"{v:.1f}%" for v in pct1],
+            textposition="outside",
+        ))
+        fig_w.add_trace(go.Bar(
+            name=p2["def"]["name"], x=countries, y=pct2,
+            marker_color=PORT_COLORS[1], text=[f"{v:.1f}%" for v in pct2],
+            textposition="outside",
+        ))
+        fig_w.update_layout(
+            barmode="group",
+            plot_bgcolor="#ffffff",
+            paper_bgcolor="#ffffff",
+            legend=dict(orientation="h", y=1.12),
+            yaxis=dict(title="Weight (%)", gridcolor="#e2e8f0"),
+            xaxis=dict(title="Country"),
+            margin=dict(t=60, b=40, l=60, r=20),
+            height=400,
+        )
+        st.markdown("<div class='section-card'><h3>Portfolio Weights by Country</h3>", unsafe_allow_html=True)
+        st.plotly_chart(fig_w, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Weight table
+        df_w = pd.DataFrame({
+            "Country": countries,
+            f"{p1['def']['name']} (%)": [f"{v:.2f}" for v in pct1],
+            f"{p2['def']['name']} (%)": [f"{v:.2f}" for v in pct2],
+        })
+        st.markdown("<div class='section-card'><h3>Weight Table</h3>", unsafe_allow_html=True)
+        st.dataframe(df_w, use_container_width=True, hide_index=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Cumulative Performance ────────────────────────────────────────────────
+    with tab_perf:
+        common_idx = p1["pnl"].index.intersection(p2["pnl"].index)
+        cum1 = (1 + p1["pnl"].loc[common_idx]).cumprod() - 1
+        cum2 = (1 + p2["pnl"].loc[common_idx]).cumprod() - 1
+
+        fig_cum = go.Figure()
+        fig_cum.add_trace(go.Scatter(
+            x=cum1.index, y=cum1 * 100,
+            name=p1["def"]["name"], line=dict(color=PORT_COLORS[0], width=2),
+        ))
+        fig_cum.add_trace(go.Scatter(
+            x=cum2.index, y=cum2 * 100,
+            name=p2["def"]["name"], line=dict(color=PORT_COLORS[1], width=2),
+        ))
+        fig_cum.add_hline(y=0, line_color="#94a3b8", line_dash="dot", line_width=1)
+        fig_cum.update_layout(
+            plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+            legend=dict(orientation="h", y=1.1),
+            yaxis=dict(title="Cumulative Return (%)", gridcolor="#e2e8f0", zeroline=False),
+            xaxis=dict(gridcolor="#e2e8f0"),
+            margin=dict(t=60, b=40, l=70, r=20), height=400,
+        )
+        st.markdown("<div class='section-card'><h3>Cumulative Return (%)</h3>", unsafe_allow_html=True)
+        st.plotly_chart(fig_cum, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Rolling 60-day volatility
+        vol1 = p1["pnl"].loc[common_idx].rolling(60).std() * np.sqrt(252) * 100
+        vol2 = p2["pnl"].loc[common_idx].rolling(60).std() * np.sqrt(252) * 100
+
+        fig_vol = go.Figure()
+        fig_vol.add_trace(go.Scatter(
+            x=vol1.index, y=vol1,
+            name=p1["def"]["name"], line=dict(color=PORT_COLORS[0], width=1.5),
+        ))
+        fig_vol.add_trace(go.Scatter(
+            x=vol2.index, y=vol2,
+            name=p2["def"]["name"], line=dict(color=PORT_COLORS[1], width=1.5),
+        ))
+        fig_vol.update_layout(
+            plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+            legend=dict(orientation="h", y=1.1),
+            yaxis=dict(title="Annualised Volatility — 60d rolling (%)", gridcolor="#e2e8f0"),
+            xaxis=dict(gridcolor="#e2e8f0"),
+            margin=dict(t=60, b=40, l=70, r=20), height=340,
+        )
+        st.markdown("<div class='section-card'><h3>Rolling 60-Day Volatility (annualised)</h3>", unsafe_allow_html=True)
+        st.plotly_chart(fig_vol, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Summary stats
+        def _stats(pnl):
+            ann = np.sqrt(252)
+            ret = pnl.mean() * 252 * 100
+            vol = pnl.std() * ann * 100
+            sharpe = (pnl.mean() / pnl.std()) * ann if pnl.std() > 0 else np.nan
+            cum = ((1 + pnl).cumprod() - 1).iloc[-1] * 100
+            roll = (1 + pnl).cumprod()
+            dd = ((roll / roll.cummax()) - 1).min() * 100
+            return {"Ann. Return (%)": f"{ret:.2f}", "Ann. Vol (%)": f"{vol:.2f}",
+                    "Sharpe": f"{sharpe:.2f}", "Total Return (%)": f"{cum:.2f}",
+                    "Max Drawdown (%)": f"{dd:.2f}"}
+
+        s1, s2 = _stats(p1["pnl"]), _stats(p2["pnl"])
+        metrics = list(s1.keys())
+        df_stats = pd.DataFrame({
+            "Metric": metrics,
+            p1["def"]["name"]: [s1[m] for m in metrics],
+            p2["def"]["name"]: [s2[m] for m in metrics],
+        })
+        st.markdown("<div class='section-card'><h3>Performance Summary</h3>", unsafe_allow_html=True)
+        st.dataframe(df_stats, use_container_width=True, hide_index=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── VaR ──────────────────────────────────────────────────────────────────
+    with tab_var:
+        conf_levels = [0.95, 0.99]
+
+        def _parametric_var(pnl, alpha):
+            mu, sigma = pnl.mean(), pnl.std()
+            var  = -(mu + norm.ppf(alpha) * sigma)
+            cvar = -(mu - sigma * norm.pdf(norm.ppf(alpha)) / (1 - alpha))
+            return var * 100, cvar * 100
+
+        def _historical_var(pnl, alpha):
+            var  = float(-np.quantile(pnl, 1 - alpha))
+            tail = pnl[pnl <= np.quantile(pnl, 1 - alpha)]
+            cvar = float(-tail.mean()) if len(tail) > 0 else np.nan
+            return var * 100, cvar * 100
+
+        rows = []
+        for conf in conf_levels:
+            for pdef_key, pnl in [(p1["def"]["name"], p1["pnl"]),
+                                   (p2["def"]["name"], p2["pnl"])]:
+                pvar_p, pcvar_p = _parametric_var(pnl, conf)
+                pvar_h, pcvar_h = _historical_var(pnl, conf)
+                rows.append({
+                    "Portfolio": pdef_key,
+                    "Confidence": f"{conf*100:.0f}%",
+                    "Param VaR (%)": f"{pvar_p:.3f}",
+                    "Param CVaR (%)": f"{pcvar_p:.3f}",
+                    "Hist VaR (%)": f"{pvar_h:.3f}",
+                    "Hist CVaR (%)": f"{pcvar_h:.3f}",
+                })
+
+        df_var = pd.DataFrame(rows)
+        st.markdown("<div class='section-card'><h3>Daily VaR & CVaR (as % of portfolio value)</h3>", unsafe_allow_html=True)
+        st.dataframe(df_var, use_container_width=True, hide_index=True)
+        st.caption("Parametric VaR assumes normally distributed daily P&L. Historical VaR uses empirical quantiles.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # VaR bar chart
+        fig_var = go.Figure()
+        for conf in conf_levels:
+            subset = df_var[df_var["Confidence"] == f"{conf*100:.0f}%"]
+            fig_var.add_trace(go.Bar(
+                name=f"Param VaR {conf*100:.0f}%",
+                x=subset["Portfolio"].tolist(),
+                y=subset["Param VaR (%)"].astype(float).tolist(),
+                marker_color=PORT_COLORS if conf == 0.95 else ["#5b7fa6", "#f0a864"],
+            ))
+        fig_var.update_layout(
+            barmode="group",
+            plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+            yaxis=dict(title="Daily VaR (%)", gridcolor="#e2e8f0"),
+            legend=dict(orientation="h", y=1.12),
+            margin=dict(t=60, b=40, l=60, r=20), height=360,
+        )
+        st.markdown("<div class='section-card'><h3>Parametric VaR Comparison</h3>", unsafe_allow_html=True)
+        st.plotly_chart(fig_var, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── P&L Comparison ───────────────────────────────────────────────────────
+    with tab_compare:
+        common_idx2 = p1["pnl"].index.intersection(p2["pnl"].index)
+        pnl1 = p1["pnl"].loc[common_idx2] * 100
+        pnl2 = p2["pnl"].loc[common_idx2] * 100
+
+        fig_pnl = go.Figure()
+        fig_pnl.add_trace(go.Scatter(
+            x=pnl1.index, y=pnl1,
+            name=p1["def"]["name"],
+            line=dict(color=PORT_COLORS[0], width=1),
+            opacity=0.85,
+        ))
+        fig_pnl.add_trace(go.Scatter(
+            x=pnl2.index, y=pnl2,
+            name=p2["def"]["name"],
+            line=dict(color=PORT_COLORS[1], width=1),
+            opacity=0.85,
+        ))
+        fig_pnl.add_hline(y=0, line_color="#94a3b8", line_dash="dot", line_width=1)
+        fig_pnl.update_layout(
+            plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+            legend=dict(orientation="h", y=1.1),
+            yaxis=dict(title="Daily P&L (%)", gridcolor="#e2e8f0"),
+            xaxis=dict(gridcolor="#e2e8f0"),
+            margin=dict(t=60, b=40, l=70, r=20), height=400,
+        )
+        st.markdown("<div class='section-card'><h3>Daily P&L Overlay</h3>", unsafe_allow_html=True)
+        st.plotly_chart(fig_pnl, use_container_width=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Difference series
+        diff = (pnl1 - pnl2).dropna()
+        fig_diff = go.Figure()
+        fig_diff.add_trace(go.Bar(
+            x=diff.index, y=diff,
+            name="P1 − P2",
+            marker_color=np.where(diff >= 0, PORT_COLORS[0], PORT_COLORS[1]).tolist(),
+        ))
+        fig_diff.add_hline(y=0, line_color="#94a3b8", line_dash="dot", line_width=1)
+        fig_diff.update_layout(
+            plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+            yaxis=dict(title="P1 − P2 daily P&L (%)", gridcolor="#e2e8f0"),
+            xaxis=dict(gridcolor="#e2e8f0"),
+            margin=dict(t=40, b=40, l=70, r=20), height=320,
+            showlegend=False,
+        )
+        st.markdown("<div class='section-card'><h3>Daily P&L Difference (Portfolio 1 − Portfolio 2)</h3>", unsafe_allow_html=True)
+        st.plotly_chart(fig_diff, use_container_width=True)
+        corr = float(pnl1.corr(pnl2))
+        st.caption(f"Portfolio correlation: {corr:.4f}")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Risk Statistics ───────────────────────────────────────────────────────
+    with tab_risk:
+
+        @st.cache_data(show_spinner="Loading yield levels…")
+        def _load_yield_levels():
+            cfg = load_config()
+            all_c = cfg["countries"]["local_currency"] + cfg["countries"]["hard_currency"]
+            excluded = cfg.get("excluded_series", {})
+            out = {}
+            for country in all_c:
+                try:
+                    df = load_country_yields(country, "data/raw")
+                    excl = excluded.get(country, [])
+                    df = df.drop(columns=[c for c in excl if c in df.columns])
+                    out[country] = df
+                except Exception:
+                    pass
+            return out
+
+        try:
+            yield_levels = _load_yield_levels()
+        except Exception as _ye:
+            st.warning(f"Could not load yield levels: {_ye}")
+            yield_levels = {}
+
+        def _fmt(val, fmt=".2f"):
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                return "N/A"
+            return f"{val:{fmt}}"
+
+        def _risk_stats(pdef, pnl, lvls, rf_data=None):
+            raw_w = pdef["weights"]
+            tot_w = sum(raw_w.values())
+            w = {k: v / tot_w for k, v in raw_w.items()}
+            D = float(pdef["effective_duration"])
+            mat = pdef["benchmark_maturity"]
+            mat_n = int(mat[:-1])
+            n = len(pnl)
+
+            # ── Return metrics ──────────────────────────────────────────────
+            cum_log = float(np.log1p(pnl).sum() * 100)
+            ann_ret = float(((1 + pnl).prod() ** (252 / n) - 1) * 100)
+
+            # Carry: portfolio-weighted latest benchmark yield
+            c_vals = {}
+            for c in w:
+                if c in lvls and mat in lvls[c].columns:
+                    s = lvls[c][mat].dropna()
+                    if len(s) > 0:
+                        c_vals[c] = float(s.iloc[-1])
+            if c_vals:
+                ws = sum(w[c] for c in c_vals)
+                carry = sum(w[c] * c_vals[c] for c in c_vals) / ws
+            else:
+                carry = np.nan
+
+            # Roll-down: D_eff × slope_per_year toward next shorter maturity
+            rd_vals = {}
+            for c in w:
+                if c not in lvls:
+                    continue
+                avail_nums = sorted([int(x[:-1]) for x in lvls[c].columns])
+                shorter = [m for m in avail_nums if m < mat_n]
+                if not shorter:
+                    continue
+                ns = max(shorter)
+                ns_str = f"{ns}Y"
+                sub = lvls[c][[mat, ns_str]].dropna()
+                if len(sub) == 0:
+                    continue
+                row = sub.iloc[-1]
+                slope = (row[mat] - row[ns_str]) / (mat_n - ns)
+                rd_vals[c] = D * slope
+            if rd_vals:
+                ws_rd = sum(w[c] for c in rd_vals)
+                rolldown = sum(w[c] * rd_vals[c] for c in rd_vals) / ws_rd
+            else:
+                rolldown = np.nan
+
+            # ── Risk metrics ────────────────────────────────────────────────
+            ann_vol = float(pnl.std() * np.sqrt(252) * 100)
+            cum_s = (1 + pnl).cumprod()
+            max_dd = float(((cum_s / cum_s.cummax()) - 1).min() * 100)
+
+            # Duration & bond analytics
+            mod_dur = D
+            dv01 = D * 0.01  # % of NAV per 1bp parallel shift (D_eff × 0.0001 expressed as %)
+
+            ytm = carry  # latest weighted benchmark yield as YTM proxy
+            if not np.isnan(ytm):
+                y_f = ytm / 100
+                d_mac = D * (1 + y_f)
+                convexity = d_mac * (d_mac + 1) / (1 + y_f) ** 2
+            else:
+                convexity = np.nan
+
+            # Yield curve slope: (max_maturity − min_maturity) yield, portfolio-weighted
+            sl_vals = {}
+            for c in w:
+                if c not in lvls:
+                    continue
+                lr = lvls[c].dropna(how="all").iloc[-1].dropna()
+                avail = sorted(lr.index, key=lambda x: int(x[:-1]))
+                if len(avail) >= 2:
+                    sl_vals[c] = float(lr[avail[-1]] - lr[avail[0]])
+            if sl_vals:
+                ws_sl = sum(w[c] for c in sl_vals)
+                yc_slope = sum(w[c] * sl_vals[c] for c in sl_vals) / ws_sl
+            else:
+                yc_slope = np.nan
+
+            # Key-rate duration by country: w_i × D_eff
+            krd = {c: w[c] * D for c in w}
+
+            # ── Ratios (rf = 0 baseline) ─────────────────────────────────────
+            sharpe_zero = (ann_ret / 100) / (ann_vol / 100) if ann_vol > 0 else np.nan
+            ds_zero = float(np.mean(np.minimum(pnl, 0.0) ** 2))
+            sortino_zero = (ann_ret / 100) / (np.sqrt(ds_zero) * np.sqrt(252)) if ds_zero > 0 else np.nan
+            calmar = (ann_ret / 100) / abs(max_dd / 100) if max_dd != 0 else np.nan
+
+            # ── Ratios (rf = €STR) ───────────────────────────────────────────
+            current_estr = np.nan
+            current_sofr = np.nan
+            sharpe = sharpe_zero
+            sortino = sortino_zero
+            avg_estr = np.nan
+            if rf_data is not None:
+                try:
+                    rf_estr = align_rf_to_pnl(rf_data, pnl, column="estr_pct")
+                    common = pnl.index.intersection(rf_estr.index)
+                    excess = pnl.loc[common] - rf_estr.loc[common]
+                    n_exc = len(excess)
+                    ann_exc = float(((1 + excess).prod() ** (252 / n_exc) - 1) * 100)
+                    exc_vol = float(excess.std() * np.sqrt(252) * 100)
+                    sharpe = (ann_exc / 100) / (exc_vol / 100) if exc_vol > 0 else np.nan
+                    ds_rf = float(np.mean(np.minimum(excess, 0.0) ** 2))
+                    sortino = (ann_exc / 100) / (np.sqrt(ds_rf) * np.sqrt(252)) if ds_rf > 0 else np.nan
+                    avg_estr = float(rf_data["estr_pct"].reindex(pnl.index, method="ffill").dropna().mean())
+                    current_estr = float(rf_data["estr_pct"].dropna().iloc[-1])
+                    current_sofr = float(rf_data["sofr_pct"].dropna().iloc[-1])
+                except Exception:
+                    pass
+
+            # ── VaR / CVaR ──────────────────────────────────────────────────
+            mu_p, sig_p = pnl.mean(), pnl.std()
+            np.random.seed(42)
+            sims = np.random.normal(mu_p, sig_p, 50_000)
+            var_rows = []
+            for alpha in [0.05, 0.10]:
+                z = norm.ppf(alpha)
+                pv  = -(mu_p + z * sig_p) * 100
+                pcv = -(mu_p - sig_p * norm.pdf(-z) / alpha) * 100
+                q   = float(np.quantile(pnl, alpha))
+                hv  = -q * 100
+                tmask = pnl <= q
+                hcv = -float(pnl[tmask].mean()) * 100 if tmask.any() else np.nan
+                mcv = -float(np.percentile(sims, alpha * 100)) * 100
+                var_rows.append({
+                    "α": f"{int(alpha * 100)}%",
+                    "Confidence": f"{int((1 - alpha) * 100)}%",
+                    "Param VaR (%)": round(pv, 4),
+                    "Param CVaR (%)": round(pcv, 4),
+                    "Hist VaR (%)": round(hv, 4),
+                    "Hist CVaR (%)": round(hcv, 4),
+                    "MC VaR (%)": round(mcv, 4),
+                })
+
+            return dict(
+                cum_log=cum_log, ann_ret=ann_ret, carry=carry, rolldown=rolldown,
+                ann_vol=ann_vol, max_dd=max_dd,
+                sharpe=sharpe, sortino=sortino,
+                sharpe_zero=sharpe_zero, sortino_zero=sortino_zero,
+                calmar=calmar, mod_dur=mod_dur, dv01=dv01, convexity=convexity,
+                ytm=ytm, yc_slope=yc_slope, krd=krd, var_rows=var_rows,
+                current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
+            )
+
+        @st.cache_data(show_spinner="Loading risk-free rates…")
+        def _load_rf_data():
+            cfg = load_config()
+            key_path = cfg.get("fred", {}).get("key_path", "private/fred_key.txt")
+            out_path  = cfg.get("fred", {}).get("output_path", "data/output/risk_free_rates.csv")
+            try:
+                key = open(key_path).read().strip()
+                return load_risk_free_rates(out_path, fred_api_key=key)
+            except Exception:
+                return None
+
+        rf_data = _load_rf_data()
+        rs1 = _risk_stats(p1["def"], p1["pnl"], yield_levels, rf_data)
+        rs2 = _risk_stats(p2["def"], p2["pnl"], yield_levels, rf_data)
+        pn1, pn2 = p1["def"]["name"], p2["def"]["name"]
+
+        FLAG_R = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
+                  "Colombia": "🇨🇴", "Hungary": "🇭🇺", "Romania": "🇷🇴"}
+
+        # ── 1. Return Metrics ──────────────────────────────────────────────
+        st.markdown("<div class='section-card'><h3>Return Metrics</h3>", unsafe_allow_html=True)
+        df_ret = pd.DataFrame([
+            ("Cumulative Log Return (%)",  _fmt(rs1["cum_log"]),   _fmt(rs2["cum_log"])),
+            ("Annualised Return (%)",       _fmt(rs1["ann_ret"]),   _fmt(rs2["ann_ret"])),
+            ("Carry — Wtd Avg Yield (%)",  _fmt(rs1["carry"]),     _fmt(rs2["carry"])),
+            ("Roll-Down Return (est. %)",  _fmt(rs1["rolldown"]),  _fmt(rs2["rolldown"])),
+        ], columns=["Metric", pn1, pn2])
+        st.dataframe(df_ret, use_container_width=True, hide_index=True)
+        st.caption(
+            "Carry = portfolio-weighted latest benchmark yield. "
+            "Roll-down ≈ D_eff × annual curve slope to next shorter maturity, portfolio-weighted. "
+            "South Africa excluded from roll-down (no maturity shorter than 5Y available in data)."
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── 2. Risk & Ratio Metrics ────────────────────────────────────────
+        estr_now = rs1["current_estr"]
+        sofr_now = rs1["current_sofr"]
+        avg_e    = rs1["avg_estr"]
+        has_rf   = not np.isnan(estr_now)
+        rf_label = f"€STR ({estr_now:.2f}%)" if has_rf else "0 (no rf data)"
+
+        # Rate context banner
+        if has_rf:
+            st.markdown(f"""
+            <div style='background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
+                        padding:10px 16px;font-size:0.85rem;color:#1e40af;margin-bottom:12px;'>
+                <strong>Risk-free rates (FRED, latest):</strong>
+                &nbsp; €STR = <strong>{estr_now:.3f}%</strong>
+                &nbsp;|&nbsp; SOFR = <strong>{sofr_now:.3f}%</strong>
+                &nbsp;|&nbsp; Average €STR over portfolio history = <strong>{avg_e:.3f}%</strong>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<div class='section-card'><h3>Risk & Ratio Metrics</h3>", unsafe_allow_html=True)
+        df_risk_tbl = pd.DataFrame([
+            ("Annualised Volatility (%)",       _fmt(rs1["ann_vol"]),       _fmt(rs2["ann_vol"])),
+            ("Maximum Drawdown (%)",            _fmt(rs1["max_dd"]),        _fmt(rs2["max_dd"])),
+            (f"Sharpe Ratio (rf = {rf_label})", _fmt(rs1["sharpe"]),        _fmt(rs2["sharpe"])),
+            (f"Sortino Ratio (rf = {rf_label})",_fmt(rs1["sortino"]),       _fmt(rs2["sortino"])),
+            ("Sharpe Ratio (rf = 0, ref)",      _fmt(rs1["sharpe_zero"]),   _fmt(rs2["sharpe_zero"])),
+            ("Sortino Ratio (MAR = 0, ref)",    _fmt(rs1["sortino_zero"]),  _fmt(rs2["sortino_zero"])),
+            ("Calmar Ratio",                    _fmt(rs1["calmar"]),        _fmt(rs2["calmar"])),
+        ], columns=["Metric", pn1, pn2])
+        st.dataframe(df_risk_tbl, use_container_width=True, hide_index=True)
+        st.caption(
+            f"Sharpe and Sortino use daily excess returns over €STR (EUR risk-free, source: FRED). "
+            f"Sortino denominator = annualised downside semi-deviation of excess returns (√(E[min(excess,0)²]) × √252). "
+            f"Calmar = annualised total return / |max drawdown|. "
+            f"rf=0 rows shown for reference."
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── 3. Bond Analytics ──────────────────────────────────────────────
+        st.markdown("<div class='section-card'><h3>Bond Analytics</h3>", unsafe_allow_html=True)
+        df_bond = pd.DataFrame([
+            ("Modified Duration (yrs)",          _fmt(rs1["mod_dur"]),          _fmt(rs2["mod_dur"])),
+            ("DV01 (% of NAV per 1bp parallel)", _fmt(rs1["dv01"], ".4f"),      _fmt(rs2["dv01"], ".4f")),
+            ("Convexity — approx (yrs²)",        _fmt(rs1["convexity"], ".1f"), _fmt(rs2["convexity"], ".1f")),
+            ("YTM — Wtd Avg Benchmark (%)",      _fmt(rs1["ytm"]),              _fmt(rs2["ytm"])),
+            ("Yield Curve Slope (long−short, %)",_fmt(rs1["yc_slope"]),         _fmt(rs2["yc_slope"])),
+        ], columns=["Metric", pn1, pn2])
+        st.dataframe(df_bond, use_container_width=True, hide_index=True)
+        st.caption(
+            "Modified Duration = D_eff = 5.22 from config (constant proxy; same for both portfolios). "
+            "DV01 = D_eff × 0.0001 expressed as % = D_eff × 0.01%. "
+            "Convexity ≈ D_mac × (D_mac+1) / (1+y)² where D_mac = D_eff × (1+YTM). "
+            "YTM differs between portfolios due to different country weights. "
+            "Yield slope = weighted (max_maturity − min_maturity) yield per country, latest date."
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── 4. VaR / CVaR ─────────────────────────────────────────────────
+        st.markdown("<div class='section-card'><h3>VaR & CVaR — Daily (% of portfolio NAV)</h3>", unsafe_allow_html=True)
+        var_long = []
+        for pname_v, rs_v in [(pn1, rs1), (pn2, rs2)]:
+            for vrow in rs_v["var_rows"]:
+                var_long.append({
+                    "Portfolio":      pname_v,
+                    "α":              vrow["α"],
+                    "Confidence":     vrow["Confidence"],
+                    "Param VaR (%)":  f"{vrow['Param VaR (%)']:.4f}",
+                    "Param CVaR (%)": f"{vrow['Param CVaR (%)']:.4f}",
+                    "Hist VaR (%)":   f"{vrow['Hist VaR (%)']:.4f}",
+                    "Hist CVaR (%)":  f"{vrow['Hist CVaR (%)']:.4f}",
+                    "MC VaR (%)":     f"{vrow['MC VaR (%)']:.4f}",
+                })
+        st.dataframe(pd.DataFrame(var_long), use_container_width=True, hide_index=True)
+        st.caption(
+            "Parametric: Normal P&L assumption, z-score method. "
+            "CVaR (Normal) = −(μ − σ × φ(z_α) / α). "
+            "Historical: empirical quantile / tail mean. "
+            "Monte Carlo: 50,000 draws from N(μ, σ²), seed = 42."
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── 5. Key-Rate Duration by Country ───────────────────────────────
+        st.markdown("<div class='section-card'><h3>Key-Rate Duration by Country (yrs)</h3>", unsafe_allow_html=True)
+        all_krd_c = sorted(set(rs1["krd"]) | set(rs2["krd"]))
+        krd_labels = [f"{FLAG_R.get(c, '')} {c}" for c in all_krd_c]
+
+        fig_krd = go.Figure()
+        fig_krd.add_trace(go.Bar(
+            name=pn1, x=krd_labels,
+            y=[rs1["krd"].get(c, 0) for c in all_krd_c],
+            marker_color=PORT_COLORS[0],
+            text=[f"{rs1['krd'].get(c, 0):.3f}" for c in all_krd_c],
+            textposition="outside",
+        ))
+        fig_krd.add_trace(go.Bar(
+            name=pn2, x=krd_labels,
+            y=[rs2["krd"].get(c, 0) for c in all_krd_c],
+            marker_color=PORT_COLORS[1],
+            text=[f"{rs2['krd'].get(c, 0):.3f}" for c in all_krd_c],
+            textposition="outside",
+        ))
+        fig_krd.update_layout(
+            barmode="group",
+            plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+            legend=dict(orientation="h", y=1.12),
+            yaxis=dict(title="KRD (yrs)", gridcolor="#e2e8f0"),
+            margin=dict(t=60, b=40, l=60, r=20), height=380,
+        )
+        st.plotly_chart(fig_krd, use_container_width=True)
+
+        krd_tbl = pd.DataFrame({
+            "Country": krd_labels,
+            f"KRD — {pn1} (yrs)": [f"{rs1['krd'].get(c, 0):.4f}" for c in all_krd_c],
+            f"KRD — {pn2} (yrs)": [f"{rs2['krd'].get(c, 0):.4f}" for c in all_krd_c],
+        })
+        st.dataframe(krd_tbl, use_container_width=True, hide_index=True)
+        st.caption(
+            "KRD by country = w_i × D_eff. Sum across all countries = portfolio modified duration. "
+            "Intra-country maturity KRDs require full bond universe (see missing-data report)."
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── 6. Country Yield-Change Correlation Matrix ─────────────────────
+        st.markdown("<div class='section-card'><h3>Country Yield-Change Correlation Matrix</h3>", unsafe_allow_html=True)
+        mat_corr = p1["def"]["benchmark_maturity"]
+        full_dy = {}
+        for country in all_krd_c:
+            if country in yield_levels and mat_corr in yield_levels[country].columns:
+                full_dy[country] = yield_levels[country][mat_corr].diff().dropna()
+
+        if len(full_dy) >= 2:
+            corr_df = pd.DataFrame(full_dy).dropna().corr()
+            fig_corr = go.Figure(data=go.Heatmap(
+                z=corr_df.values,
+                x=[f"{FLAG_R.get(c, '')} {c}" for c in corr_df.columns],
+                y=[f"{FLAG_R.get(c, '')} {c}" for c in corr_df.index],
+                colorscale="RdBu_r",
+                zmin=-1, zmax=1,
+                text=[[f"{v:.2f}" for v in row] for row in corr_df.values],
+                texttemplate="%{text}",
+                colorbar=dict(title="ρ"),
+            ))
+            fig_corr.update_layout(
+                plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+                margin=dict(t=40, b=80, l=130, r=20),
+                height=440,
+            )
+            st.plotly_chart(fig_corr, use_container_width=True)
+            st.caption(
+                f"Daily first-differences of {mat_corr} benchmark yields, all common available dates. "
+                "Correlation is market-structural and identical for both portfolios; "
+                "portfolio risk depends on this matrix weighted by each portfolio's KRD vector."
+            )
+        else:
+            st.warning("Not enough data to build correlation matrix.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Alert History ─────────────────────────────────────────────────────────────
 elif page == "Alert History":
