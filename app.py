@@ -247,6 +247,27 @@ st.markdown("""
         color: #c9d6e3 !important;
     }
 
+    /* ── Home page section label ── */
+    .home-section-label {
+        font-size: 0.75rem;
+        color: #6b7c93;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin: 28px 0 12px 0;
+        font-weight: 600;
+    }
+
+    /* ── Home nav container cards hover effect ── */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: #e2e8f0 !important;
+        border-radius: 10px !important;
+        transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:hover {
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08) !important;
+        border-color: #1b3a5c !important;
+    }
+
     /* ── Hide Streamlit branding ── */
     #MainMenu, footer { visibility: hidden; }
     header[data-testid="stHeader"] { background: transparent; }
@@ -254,6 +275,50 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 OUT = Path("data/output")
+
+PAGES = [
+    "Home", "Pipeline Health", "Data Load", "PCA & Regime",
+    "VaR Engine", "Portfolios", "Alert History", "Daily Briefings",
+]
+_NAV_KEY = "_nav"
+
+if _NAV_KEY not in st.session_state:
+    st.session_state[_NAV_KEY] = "Home"
+
+
+@st.cache_data(show_spinner="Loading portfolio data…")
+def _load_portfolio_data():
+    cfg = load_config()
+    change_dfs = load_all_countries_combined(cfg, data_dir="data/raw")
+    results = []
+    for pdef in cfg["portfolios"]:
+        pnl, proxy_dy = build_portfolio_pnl_from_def(change_dfs, pdef)
+
+        # ── Add daily carry: portfolio-weighted benchmark yield / 252 ─────────
+        # Converts the pure rate-change proxy into a total-return proxy.
+        # For the HC fund this uses local-currency yields as a carry approximation
+        # (actual USD bond yields are lower — the proxy remains an estimate).
+        mat = pdef["benchmark_maturity"]
+        raw_w = pdef["weights"]
+        tot_w = sum(raw_w.values())
+        w_norm = {k: v / tot_w for k, v in raw_w.items()}
+        carry_parts: dict[str, pd.Series] = {}
+        for country, wt in w_norm.items():
+            try:
+                lvl = load_country_yields(country, data_dir="data/raw")
+                if mat in lvl.columns:
+                    carry_parts[country] = lvl[mat] * wt
+            except Exception:
+                pass
+        if carry_parts:
+            port_yield_pct = (
+                pd.DataFrame(carry_parts).sum(axis=1).reindex(pnl.index).ffill()
+            )
+            pnl = pnl + (port_yield_pct / 100 / 252)
+
+        results.append({"def": pdef, "pnl": pnl, "proxy_dy": proxy_dy})
+    return results
+
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -266,7 +331,8 @@ with st.sidebar:
     st.markdown("<div style='font-size:0.72rem; color:#4a6a85; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px;'>Navigation</div>", unsafe_allow_html=True)
     page = st.radio(
         "",
-        ["Pipeline Health", "Data Load", "PCA & Regime", "VaR Engine", "Portfolios", "Alert History", "Daily Briefings"],
+        PAGES,
+        key=_NAV_KEY,
         label_visibility="collapsed",
     )
 
@@ -300,8 +366,123 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Home ──────────────────────────────────────────────────────────────────────
+if page == "Home":
+
+    # ── Portfolio Snapshot ────────────────────────────────────────────────────
+    st.markdown("<div class='home-section-label'>Portfolio Snapshot</div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="background:#fefce8; border:1px solid #fde68a; border-radius:8px;
+                padding:10px 16px; font-size:0.82rem; color:#92400e; margin-bottom:14px;">
+        <strong>Rate &amp; carry proxy</strong> — Metrics are computed from a yield-change
+        duration model with daily coupon accrual added. <strong>FX return is excluded</strong>
+        (a significant driver for the LC fund). The HC fund uses local-currency sovereign yields
+        as a proxy for its USD-denominated holdings — treat its absolute return as an
+        approximation. For verified NAV performance refer to fund factsheets.
+    </div>
+    """, unsafe_allow_html=True)
+
+    try:
+        _home_ports = _load_portfolio_data()
+        _hp1, _hp2 = _home_ports[0], _home_ports[1]
+
+        def _quick_stats(pnl):
+            n = len(pnl)
+            ann = np.sqrt(252)
+            ret = float(((1 + pnl).prod() ** (252 / n) - 1) * 100)
+            vol = float(pnl.std() * ann * 100)
+            sharpe = ret / vol if vol > 0 else np.nan
+            cum = float(((1 + pnl).cumprod() - 1).iloc[-1] * 100)
+            roll = (1 + pnl).cumprod()
+            dd = float(((roll / roll.cummax()) - 1).min() * 100)
+            var95 = float(-(pnl.mean() + norm.ppf(0.05) * pnl.std()) * 100)
+            start = pnl.index.min().strftime("%b %Y")
+            end   = pnl.index.max().strftime("%b %Y")
+            return {"ret": ret, "vol": vol, "sharpe": sharpe, "cum": cum,
+                    "dd": dd, "var95": var95, "start": start, "end": end}
+
+        _hqs1 = _quick_stats(_hp1["pnl"])
+        _hqs2 = _quick_stats(_hp2["pnl"])
+
+        pc_col1, pc_col2 = st.columns(2)
+        for _col, _pdata, _qs in [(pc_col1, _hp1, _hqs1), (pc_col2, _hp2, _hqs2)]:
+            with _col:
+                _pn = _pdata["def"]["name"]
+                _aum = _pdata["def"].get("aum_eur", 0)
+                _aum_str = f"€{_aum/1e6:.0f}M" if _aum else "N/A"
+                _rc = "#4ade80" if _qs["ret"] > 0 else "#f87171"
+                _cc = "#4ade80" if _qs["cum"] > 0 else "#f87171"
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 100%);
+                            border-radius: 12px; padding: 22px 24px; color: #fff;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.12);">
+                    <div style="font-size: 1.1rem; font-weight: 700; margin-bottom: 4px;">{_pn}</div>
+                    <div style="font-size: 0.78rem; color: #8ab4d4; margin-bottom: 16px;">
+                        AUM: <strong style="color:#fff;">{_aum_str}</strong>
+                        &nbsp;·&nbsp; {_qs['start']} – {_qs['end']}
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+                        <div>
+                            <div style="font-size: 0.65rem; color: #8ab4d4; text-transform:uppercase; letter-spacing:0.05em;">Ann. Rtn (proxy)</div>
+                            <div style="font-size: 1.05rem; font-weight: 700; color:{_rc};">{_qs['ret']:+.2f}%</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.65rem; color: #8ab4d4; text-transform:uppercase; letter-spacing:0.05em;">Ann. Volatility</div>
+                            <div style="font-size: 1.05rem; font-weight: 700;">{_qs['vol']:.2f}%</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.65rem; color: #8ab4d4; text-transform:uppercase; letter-spacing:0.05em;">Sharpe rf=0 (proxy)</div>
+                            <div style="font-size: 1.05rem; font-weight: 700;">{_qs['sharpe']:.2f}</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.65rem; color: #8ab4d4; text-transform:uppercase; letter-spacing:0.05em;">Max Drawdown</div>
+                            <div style="font-size: 1.05rem; font-weight: 700; color:#f87171;">{_qs['dd']:.2f}%</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.65rem; color: #8ab4d4; text-transform:uppercase; letter-spacing:0.05em;">95% VaR (daily)</div>
+                            <div style="font-size: 1.05rem; font-weight: 700;">{_qs['var95']:.3f}%</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 0.65rem; color: #8ab4d4; text-transform:uppercase; letter-spacing:0.05em;">Cum. Rtn (proxy)</div>
+                            <div style="font-size: 1.05rem; font-weight: 700; color:{_cc};">{_qs['cum']:+.2f}%</div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    except Exception:
+        st.info("Portfolio data not yet available — run the notebook to generate outputs.")
+
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+
+    # ── Navigation Grid ───────────────────────────────────────────────────────
+    st.markdown("<div class='home-section-label'>Explore the Dashboard</div>", unsafe_allow_html=True)
+
+    _NAV_ITEMS = [
+        ("Pipeline Health", "🔧", "System status, health checks, and execution log"),
+        ("Data Load",       "📂", "Inspect raw yield data, country coverage, and time-series"),
+        ("PCA & Regime",    "📊", "Factor loadings, PC scores, and GMM market regimes"),
+        ("VaR Engine",      "⚠️",  "P&L bands with parametric, historical and Monte Carlo VaR"),
+        ("Portfolios",      "💼", "Full analytics: performance, risk stats, DV01, and KRD"),
+        ("Alert History",   "🔔", "Regime-shift and factor-alert log with severity filters"),
+        ("Daily Briefings", "📝", "LLM-generated PM briefings for key market dates"),
+    ]
+
+    for _row in [_NAV_ITEMS[:4], _NAV_ITEMS[4:]]:
+        _nav_cols = st.columns(4)
+        for _j, (_pg, _ic, _ds) in enumerate(_row):
+            with _nav_cols[_j]:
+                with st.container(border=True):
+                    st.markdown(f"**{_ic}&nbsp; {_pg}**")
+                    st.caption(_ds)
+                    if st.button("Open →", key=f"navbtn_{_pg}", use_container_width=True):
+                        st.session_state[_NAV_KEY] = _pg
+                        st.rerun()
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
 # ── Pipeline Health ───────────────────────────────────────────────────────────
-if page == "Pipeline Health":
+elif page == "Pipeline Health":
     health_path = OUT / "health_check.json"
     if not health_path.exists():
         st.warning("health_check.json not found. Run Module 4 (Pipeline Health Monitor) first.")
@@ -540,16 +721,6 @@ elif page == "Daily Briefings":
 # ── Portfolios ────────────────────────────────────────────────────────────────
 elif page == "Portfolios":
 
-    @st.cache_data(show_spinner="Loading yield data…")
-    def _load_portfolio_data():
-        cfg = load_config()
-        change_dfs = load_all_countries_combined(cfg, data_dir="data/raw")
-        results = []
-        for pdef in cfg["portfolios"]:
-            pnl, proxy_dy = build_portfolio_pnl_from_def(change_dfs, pdef)
-            results.append({"def": pdef, "pnl": pnl, "proxy_dy": proxy_dy})
-        return results
-
     PORT_COLORS = ["#1b3a5c", "#e67e22"]
 
     try:
@@ -560,6 +731,19 @@ elif page == "Portfolios":
 
     p1 = portfolio_results[0]
     p2 = portfolio_results[1]
+
+    st.markdown("""
+    <div style="background:#fefce8; border:1px solid #fde68a; border-radius:8px;
+                padding:10px 16px; font-size:0.82rem; color:#92400e; margin-bottom:16px;">
+        <strong>Rate &amp; carry proxy</strong> — All P&amp;L and performance metrics
+        use a yield-change duration model plus daily coupon accrual
+        (ΔP/P ≈ −D_eff × Δy/100 + y_t/252).
+        <strong>FX return is excluded</strong> — material for the LC fund.
+        The HC fund uses local-currency yields as a proxy for its USD-denominated holdings.
+        Risk metrics (VaR, vol, DV01) are internally consistent with this proxy;
+        return and Sharpe figures are estimates, not NAV-based performance.
+    </div>
+    """, unsafe_allow_html=True)
 
     tab_weights, tab_perf, tab_var, tab_compare, tab_risk = st.tabs(
         ["Weights", "Cumulative Performance", "VaR", "P&L Comparison", "Risk Statistics"]
