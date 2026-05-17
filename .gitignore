@@ -28,3 +28,7 @@ Dockerfile
 CLAUDE.md
 run_dashboard.bat
 README.md
+
+# Local tooling
+.claude/
+nb_scan.txt

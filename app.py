@@ -6,13 +6,14 @@ Run:  streamlit run app.py
 """
 
 import json
+import os
 import streamlit as st
 import pandas as pd
 from pathlib import Path
 
 st.set_page_config(
     page_title="EM FI Intelligence",
-    page_icon="📊",
+    page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/>",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -224,6 +225,20 @@ st.markdown("""
         color: #1e293b !important;
     }
 
+    /* ── Sidebar expand arrow (visible when sidebar is collapsed) ── */
+    [data-testid="stExpandSidebarButton"],
+    [data-testid="stExpandSidebarButton"] * {
+        color: #1b3a5c !important;
+    }
+
+    /* ── Sidebar collapse arrow (visible when sidebar is open) — always show ── */
+    [data-testid="stSidebarCollapseButton"] {
+        visibility: visible !important;
+    }
+    [data-testid="stSidebarCollapseButton"] * {
+        color: #c9d6e3 !important;
+    }
+
     /* ── Hide Streamlit branding ── */
     #MainMenu, footer { visibility: hidden; }
     header[data-testid="stHeader"] { background: transparent; }
@@ -243,9 +258,14 @@ with st.sidebar:
     st.markdown("<div style='font-size:0.72rem; color:#4a6a85; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px;'>Navigation</div>", unsafe_allow_html=True)
     page = st.radio(
         "",
-        ["Pipeline Health", "Daily Briefings", "Alert History"],
+        ["Pipeline Health", "Data Load", "PCA & Regime", "VaR Engine", "Alert History", "Daily Briefings"],
         label_visibility="collapsed",
     )
+
+    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+
+    if st.button("Stop Server", use_container_width=True, type="secondary"):
+        os._exit(0)
 
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
     st.markdown("""
@@ -327,6 +347,131 @@ if page == "Pipeline Health":
                 "output_shape": st.column_config.TextColumn("Output Shape", width="small"),
                 "error": st.column_config.TextColumn("Error", width="large"),
             },
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# ── Data Load ─────────────────────────────────────────────────────────────────
+elif page == "Data Load":
+    COUNTRIES = ["Brazil", "Mexico", "South Africa", "Poland", "Colombia", "Hungary", "Romania"]
+    FLAG = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
+             "Colombia": "🇨🇴", "Hungary": "🇭🇺", "Romania": "🇷🇴"}
+
+    summary_rows = []
+    country_dfs = {}
+    missing = []
+    for country in COUNTRIES:
+        path = OUT / f"{country}.csv"
+        if not path.exists():
+            missing.append(country)
+            continue
+        df = pd.read_csv(path, index_col=0, parse_dates=True)
+        country_dfs[country] = df
+        summary_rows.append({
+            "Country": f"{FLAG.get(country, '')} {country}",
+            "Start": df.index.min().strftime("%Y-%m-%d"),
+            "End":   df.index.max().strftime("%Y-%m-%d"),
+            "Obs":   len(df),
+            "Maturities": ", ".join(df.columns.tolist()),
+        })
+
+    if missing:
+        st.warning(f"Missing output CSVs for: {', '.join(missing)}. Run the notebook first.")
+
+    if summary_rows:
+        st.markdown("<div class='section-card'><h3>Loaded Data Summary</h3>", unsafe_allow_html=True)
+        st.dataframe(
+            pd.DataFrame(summary_rows),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Country":    st.column_config.TextColumn("Country",    width="medium"),
+                "Start":      st.column_config.TextColumn("Start",      width="small"),
+                "End":        st.column_config.TextColumn("End",        width="small"),
+                "Obs":        st.column_config.NumberColumn("Obs",      width="small"),
+                "Maturities": st.column_config.TextColumn("Maturities", width="large"),
+            },
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='section-card'><h3>Yield Levels — Select Country</h3>", unsafe_allow_html=True)
+        sel_country = st.selectbox("Country", list(country_dfs.keys()),
+                                   format_func=lambda c: f"{FLAG.get(c, '')} {c}",
+                                   label_visibility="collapsed")
+        sel_df = country_dfs[sel_country]
+        st.line_chart(sel_df, use_container_width=True, height=320)
+        st.caption(f"Yield levels (%) — {sel_country} — {len(sel_df)} observations")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# ── PCA & Regime ──────────────────────────────────────────────────────────────
+elif page == "PCA & Regime":
+    PCA_COUNTRY_FILES = {
+        "Brazil":       OUT / "pca_scores_brazil.png",
+        "Mexico":       OUT / "pca_scores_mexico.png",
+        "South Africa": OUT / "pca_scores_south_africa.png",
+        "Poland":       OUT / "pca_scores_poland.png",
+        "Colombia":     OUT / "pca_scores_colombia.png",
+        "Hungary":      OUT / "pca_scores_hungary.png",
+        "Romania":      OUT / "pca_scores_romania.png",
+    }
+
+    tab1, tab2, tab3, tab4 = st.tabs(["Loadings", "PC Scores", "Explained Variance", "Regime"])
+
+    with tab1:
+        st.subheader("Per-country PCA loadings")
+        img = OUT / "pca_loadings.png"
+        if img.exists():
+            st.image(str(img), use_container_width=True)
+        else:
+            st.warning("pca_loadings.png not found. Run the notebook first.")
+
+        st.subheader("Panel PCA loadings (cross-country)")
+        img2 = OUT / "pca_panel_loadings.png"
+        if img2.exists():
+            st.image(str(img2), use_container_width=True)
+        else:
+            st.warning("pca_panel_loadings.png not found.")
+
+    with tab2:
+        st.subheader("PC Score time series — select country")
+        FLAG2 = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
+                  "Colombia": "🇨🇴", "Hungary": "🇭🇺", "Romania": "🇷🇴"}
+        sel = st.selectbox("Country", list(PCA_COUNTRY_FILES.keys()),
+                            format_func=lambda c: f"{FLAG2.get(c, '')} {c}",
+                            label_visibility="collapsed")
+        img3 = PCA_COUNTRY_FILES[sel]
+        if img3.exists():
+            st.image(str(img3), use_container_width=True)
+        else:
+            st.warning(f"PC scores chart not found for {sel}. Run the notebook first.")
+
+    with tab3:
+        st.subheader("Explained variance by country and panel")
+        img4 = OUT / "pca_explained_variance.png"
+        if img4.exists():
+            st.image(str(img4), use_container_width=True)
+        else:
+            st.warning("pca_explained_variance.png not found.")
+
+    with tab4:
+        st.subheader("GMM Regime classification over time")
+        img5 = OUT / "regime_classification.png"
+        if img5.exists():
+            st.image(str(img5), use_container_width=True)
+        else:
+            st.warning("regime_classification.png not found. Run the notebook first.")
+
+# ── VaR Engine ────────────────────────────────────────────────────────────────
+elif page == "VaR Engine":
+    img_var = OUT / "var_pnl_bands.png"
+    if not img_var.exists():
+        st.warning("var_pnl_bands.png not found. Run Module 2 (VaR Engine) in the notebook first.")
+    else:
+        st.markdown("<div class='section-card'><h3>Portfolio P&L with VaR / CVaR Bands</h3>", unsafe_allow_html=True)
+        st.image(str(img_var), use_container_width=True)
+        st.caption(
+            "LC Fund P&L proxy (duration approximation: ΔP/P ≈ −D_eff × weighted_avg_Δy/100) "
+            "with parametric, historical and Monte Carlo VaR/CVaR bands. "
+            "Backtested via Kupiec POF and Christoffersen independence tests."
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
