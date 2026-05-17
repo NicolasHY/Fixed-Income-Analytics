@@ -851,7 +851,18 @@ elif page == "Portfolios":
             else:
                 carry = np.nan
 
-            # Roll-down: D_eff × slope_per_year toward next shorter maturity
+            # Per-country modified duration — par bond approximation
+            # MD_i = [1 − (1 + y_i)^(−T)] / y_i  (par-priced bond, annual compounding)
+            def _par_md(yield_pct, T):
+                y = yield_pct / 100
+                return float(T) if y <= 0 else (1 - (1 + y) ** (-T)) / y
+
+            md_by_c = {c: _par_md(c_vals[c], mat_n) for c in c_vals}
+            for c in w:               # fallback to config D_eff if no yield data
+                if c not in md_by_c:
+                    md_by_c[c] = D
+
+            # Roll-down: per-country MD × slope_per_year toward next shorter maturity
             rd_vals = {}
             for c in w:
                 if c not in lvls:
@@ -867,7 +878,7 @@ elif page == "Portfolios":
                     continue
                 row = sub.iloc[-1]
                 slope = (row[mat] - row[ns_str]) / (mat_n - ns)
-                rd_vals[c] = D * slope
+                rd_vals[c] = md_by_c[c] * slope
             if rd_vals:
                 ws_rd = sum(w[c] for c in rd_vals)
                 rolldown = sum(w[c] * rd_vals[c] for c in rd_vals) / ws_rd
@@ -879,15 +890,27 @@ elif page == "Portfolios":
             cum_s = (1 + pnl).cumprod()
             max_dd = float(((cum_s / cum_s.cummax()) - 1).min() * 100)
 
-            # Duration & bond analytics
-            mod_dur = D
-            dv01 = D * 0.01  # % of NAV per 1bp parallel shift (D_eff × 0.0001 expressed as %)
+            # Duration & bond analytics (portfolio-weighted from per-country par bond MD)
+            aum = float(pdef.get("aum_eur", 0))
 
-            ytm = carry  # latest weighted benchmark yield as YTM proxy
-            if not np.isnan(ytm):
-                y_f = ytm / 100
-                d_mac = D * (1 + y_f)
-                convexity = d_mac * (d_mac + 1) / (1 + y_f) ** 2
+            ws_md  = sum(w[c] for c in md_by_c)
+            mod_dur = sum(w[c] * md_by_c[c] for c in md_by_c) / ws_md
+
+            dv01     = mod_dur * 0.01                          # % of NAV per 1bp shift
+            dv01_eur = mod_dur * 0.0001 * aum if aum else np.nan  # EUR per 1bp shift
+
+            ytm = carry  # latest portfolio-weighted benchmark yield as YTM proxy
+
+            # Per-country convexity: C_i = D_mac_i × (D_mac_i + 1) / (1 + y_i)²
+            conv_by_c = {}
+            for c in md_by_c:
+                if c in c_vals:
+                    y_f_c   = c_vals[c] / 100
+                    d_mac_c = md_by_c[c] * (1 + y_f_c)
+                    conv_by_c[c] = d_mac_c * (d_mac_c + 1) / (1 + y_f_c) ** 2
+            if conv_by_c:
+                ws_cv     = sum(w[c] for c in conv_by_c)
+                convexity = sum(w[c] * conv_by_c[c] for c in conv_by_c) / ws_cv
             else:
                 convexity = np.nan
 
@@ -906,8 +929,8 @@ elif page == "Portfolios":
             else:
                 yc_slope = np.nan
 
-            # Key-rate duration by country: w_i × D_eff
-            krd = {c: w[c] * D for c in w}
+            # Key-rate duration by country: w_i × MD_i (per-country par bond duration)
+            krd = {c: w[c] * md_by_c.get(c, D) for c in w}
 
             # ── Ratios (rf = 0 baseline) ─────────────────────────────────────
             sharpe_zero = (ann_ret / 100) / (ann_vol / 100) if ann_vol > 0 else np.nan
@@ -962,13 +985,26 @@ elif page == "Portfolios":
                     "MC VaR (%)": round(mcv, 4),
                 })
 
+            # Dollar VaR rows (reuse var_rows, scale by AUM)
+            var_rows_eur = []
+            for vr in var_rows:
+                var_rows_eur.append({
+                    **vr,
+                    "Param VaR (EUR)":  vr["Param VaR (%)"]  / 100 * aum if aum else np.nan,
+                    "Hist VaR (EUR)":   vr["Hist VaR (%)"]   / 100 * aum if aum else np.nan,
+                    "MC VaR (EUR)":     vr["MC VaR (%)"]     / 100 * aum if aum else np.nan,
+                    "Param CVaR (EUR)": vr["Param CVaR (%)"] / 100 * aum if aum else np.nan,
+                })
+
             return dict(
                 cum_log=cum_log, ann_ret=ann_ret, carry=carry, rolldown=rolldown,
                 ann_vol=ann_vol, max_dd=max_dd,
                 sharpe=sharpe, sortino=sortino,
                 sharpe_zero=sharpe_zero, sortino_zero=sortino_zero,
-                calmar=calmar, mod_dur=mod_dur, dv01=dv01, convexity=convexity,
-                ytm=ytm, yc_slope=yc_slope, krd=krd, var_rows=var_rows,
+                calmar=calmar, mod_dur=mod_dur, dv01=dv01, dv01_eur=dv01_eur,
+                aum=aum, convexity=convexity, md_by_c=md_by_c,
+                ytm=ytm, yc_slope=yc_slope, krd=krd,
+                var_rows=var_rows, var_rows_eur=var_rows_eur,
                 current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
             )
 
@@ -1046,21 +1082,30 @@ elif page == "Portfolios":
         st.markdown("</div>", unsafe_allow_html=True)
 
         # ── 3. Bond Analytics ──────────────────────────────────────────────
+        def _fmt_eur(val):
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                return "N/A"
+            if abs(val) >= 1_000_000:
+                return f"€{val/1_000_000:,.3f}M"
+            return f"€{val:,.0f}"
+
         st.markdown("<div class='section-card'><h3>Bond Analytics</h3>", unsafe_allow_html=True)
         df_bond = pd.DataFrame([
+            ("AUM (EUR)",                        _fmt_eur(rs1["aum"]),          _fmt_eur(rs2["aum"])),
             ("Modified Duration (yrs)",          _fmt(rs1["mod_dur"]),          _fmt(rs2["mod_dur"])),
             ("DV01 (% of NAV per 1bp parallel)", _fmt(rs1["dv01"], ".4f"),      _fmt(rs2["dv01"], ".4f")),
+            ("DV01 (EUR per 1bp parallel)",      _fmt_eur(rs1["dv01_eur"]),     _fmt_eur(rs2["dv01_eur"])),
             ("Convexity — approx (yrs²)",        _fmt(rs1["convexity"], ".1f"), _fmt(rs2["convexity"], ".1f")),
             ("YTM — Wtd Avg Benchmark (%)",      _fmt(rs1["ytm"]),              _fmt(rs2["ytm"])),
             ("Yield Curve Slope (long−short, %)",_fmt(rs1["yc_slope"]),         _fmt(rs2["yc_slope"])),
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_bond, use_container_width=True, hide_index=True)
         st.caption(
-            "Modified Duration = D_eff = 5.22 from config (constant proxy; same for both portfolios). "
-            "DV01 = D_eff × 0.0001 expressed as % = D_eff × 0.01%. "
-            "Convexity ≈ D_mac × (D_mac+1) / (1+y)² where D_mac = D_eff × (1+YTM). "
-            "YTM differs between portfolios due to different country weights. "
-            "Yield slope = weighted (max_maturity − min_maturity) yield per country, latest date."
+            "Modified Duration = portfolio-weighted average of per-country par bond duration: "
+            "MD_i = [1 − (1 + y_i)^(−T)] / y_i (annual compounding, bond priced at par). "
+            "DV01 (EUR) = MD_portfolio × 0.0001 × AUM. "
+            "Convexity per country: C_i = D_mac_i × (D_mac_i+1) / (1+y_i)², then portfolio-weighted. "
+            "YTM = portfolio-weighted latest benchmark yield."
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1085,6 +1130,26 @@ elif page == "Portfolios":
             "CVaR (Normal) = −(μ − σ × φ(z_α) / α). "
             "Historical: empirical quantile / tail mean. "
             "Monte Carlo: 50,000 draws from N(μ, σ²), seed = 42."
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='section-card'><h3>VaR & CVaR — Daily (EUR, based on AUM)</h3>", unsafe_allow_html=True)
+        var_eur_long = []
+        for pname_v, rs_v in [(pn1, rs1), (pn2, rs2)]:
+            for vrow in rs_v["var_rows_eur"]:
+                var_eur_long.append({
+                    "Portfolio":        pname_v,
+                    "α":                vrow["α"],
+                    "Confidence":       vrow["Confidence"],
+                    "Param VaR (EUR)":  _fmt_eur(vrow["Param VaR (EUR)"]),
+                    "Param CVaR (EUR)": _fmt_eur(vrow["Param CVaR (EUR)"]),
+                    "Hist VaR (EUR)":   _fmt_eur(vrow["Hist VaR (EUR)"]),
+                    "MC VaR (EUR)":     _fmt_eur(vrow["MC VaR (EUR)"]),
+                })
+        st.dataframe(pd.DataFrame(var_eur_long), use_container_width=True, hide_index=True)
+        st.caption(
+            f"EUR VaR = VaR (%) × AUM. "
+            f"AUM: {pn1} = {_fmt_eur(rs1['aum'])}, {pn2} = {_fmt_eur(rs2['aum'])}."
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1118,14 +1183,17 @@ elif page == "Portfolios":
         st.plotly_chart(fig_krd, use_container_width=True)
 
         krd_tbl = pd.DataFrame({
-            "Country": krd_labels,
-            f"KRD — {pn1} (yrs)": [f"{rs1['krd'].get(c, 0):.4f}" for c in all_krd_c],
-            f"KRD — {pn2} (yrs)": [f"{rs2['krd'].get(c, 0):.4f}" for c in all_krd_c],
+            "Country":              krd_labels,
+            "MD (par bond, yrs)":   [f"{rs1['md_by_c'].get(c, 0):.3f}" for c in all_krd_c],
+            f"KRD — {pn1} (yrs)":  [f"{rs1['krd'].get(c, 0):.4f}" for c in all_krd_c],
+            f"KRD — {pn2} (yrs)":  [f"{rs2['krd'].get(c, 0):.4f}" for c in all_krd_c],
         })
         st.dataframe(krd_tbl, use_container_width=True, hide_index=True)
         st.caption(
-            "KRD by country = w_i × D_eff. Sum across all countries = portfolio modified duration. "
-            "Intra-country maturity KRDs require full bond universe (see missing-data report)."
+            "MD (par bond) = per-country modified duration using latest 5Y yield: "
+            "[1 − (1+y)^(−5)] / y. Both portfolios share the same MD_i; "
+            "KRDs differ only because of different weights. "
+            "KRD_i = w_i × MD_i. Sum = portfolio modified duration."
         )
         st.markdown("</div>", unsafe_allow_html=True)
 

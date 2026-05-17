@@ -195,7 +195,7 @@ Same excess-return series as above. Downside semi-deviation = `√(E[min(excess,
 | ❌ | **High** | FX spot & forward rates (BRL, MXN, ZAR, PLN) | Currency-hedged carry; FX-adjusted excess return for LC bond Sharpe |
 | ❌ | **Medium** | Coupon rates for each sovereign benchmark bond | Exact convexity, accrued carry |
 | ❌ | **Medium** | Exact residual maturity dates | Precise roll-down, modified duration drift |
-| ❌ | **Medium** | Portfolio notional (AUM in base currency) | Dollar DV01, dollar VaR |
+| ✅ | ~~Medium~~ | ~~Portfolio notional (AUM in base currency)~~ | ~~Dollar DV01, dollar VaR~~ — **done: HC €14.97M, LC €5.16B** |
 | ❌ | **Low** | Full bond universe per country (ISIN-level) | Multi-point KRD grid, exact P&L attribution |
 | ❌ | **Low** | Intermediate maturities (e.g., Hungary 2–4Y) | Accurate roll-down for all countries |
 | ❌ | **Low** | Funding / repo rates per country | Net carry (gross carry is already displayed) |

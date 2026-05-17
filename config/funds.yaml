@@ -122,8 +122,9 @@ pipeline:
 # Brazil, Colombia, Hungary, Mexico, Poland, Romania, South Africa
 # Weights are normalised to sum to 1 internally; raw values below are %.
 portfolios:
-  - name: "Portfolio 1 — Equal Weight"
+  - name: "EM Hard Currency Sustainable"
     id: "portfolio_1"
+    aum_eur: 14_970_000
     weights:
       Brazil: 14.286
       Colombia: 14.286
@@ -135,8 +136,9 @@ portfolios:
     effective_duration: 5.22
     benchmark_maturity: "5Y"
 
-  - name: "Portfolio 2 — Concentrated"
+  - name: "EM Local Currency Sustainable"
     id: "portfolio_2"
+    aum_eur: 5_160_000_000
     weights:
       Brazil: 10.0
       Colombia: 10.0
