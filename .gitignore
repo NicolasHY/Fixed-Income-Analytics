@@ -22,3 +22,9 @@ data/raw/
 data/removed/
 # data/output/ ← intentionally NOT ignored
 # Raw data sourced manually from Investing.com. Cleaned outputs are included for reproducibility
+
+# Project meta files (kept locally, not tracked)
+Dockerfile
+CLAUDE.md
+run_dashboard.bat
+README.md
