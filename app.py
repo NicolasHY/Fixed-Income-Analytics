@@ -392,19 +392,36 @@ st.markdown("""
         font-weight: 600;
     }
 
-    /* ── Home nav container cards ── */
+    /* ── Home nav container cards — equal height ── */
+    /* Step 1: stretch all columns in a nav-card row to the tallest one */
+    [data-testid="stHorizontalBlock"]:has([data-testid="stVerticalBlockBorderWrapper"]) {
+        align-items: stretch !important;
+    }
+    /* Step 2: pass height down through every intermediate wrapper */
+    [data-testid="column"]:has([data-testid="stVerticalBlockBorderWrapper"]),
+    [data-testid="column"]:has([data-testid="stVerticalBlockBorderWrapper"]) > div,
+    [data-testid="column"]:has([data-testid="stVerticalBlockBorderWrapper"]) > div > [data-testid="stVerticalBlock"] {
+        flex: 1 !important;
+        display: flex !important;
+        flex-direction: column !important;
+        min-height: 0 !important;
+    }
+    /* Step 3: the bordered card fills its column */
     [data-testid="stVerticalBlockBorderWrapper"] {
         background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 100%) !important;
         border: 1px solid #1b3a5c !important;
         border-radius: 10px !important;
         transition: box-shadow 0.15s ease, border-color 0.15s ease;
-        min-height: 148px !important;
+        flex: 1 !important;
+        height: 100% !important;
+        box-sizing: border-box !important;
     }
-    /* flex column so the button always pins to the bottom */
+    /* Step 4: inner block is flex col so button pins to bottom */
     [data-testid="stVerticalBlockBorderWrapper"] > div[data-testid="stVerticalBlock"] {
         display: flex !important;
         flex-direction: column !important;
         height: 100% !important;
+        flex: 1 !important;
     }
     [data-testid="stVerticalBlockBorderWrapper"] > div[data-testid="stVerticalBlock"] .stButton {
         margin-top: auto !important;
