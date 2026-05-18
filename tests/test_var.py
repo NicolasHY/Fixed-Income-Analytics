@@ -101,6 +101,63 @@ def compute_monte_carlo_var(pnl_series, n_sims=10000, confidence=0.95, seed=42):
     return {"VaR": var, "CVaR": cvar, "n_sims": n_sims}
 
 
+def compute_factor_idio_decomposition(yield_changes, factor_scores, weights):
+    """
+    Decompose Var(w' delta_y) into systematic (driven by factor_scores) and
+    idiosyncratic (per-series residual) components via OLS per series.
+
+    yield_changes : DataFrame, columns = series (e.g. countries), index = dates.
+    factor_scores : DataFrame, columns = factors (e.g. PC1/PC2/PC3), index = dates.
+    weights       : 1-D array, same length as yield_changes.columns.
+
+    Returns dict with keys:
+      B (n_series x n_factors), D (n_series x n_series diag of resid variances),
+      Sigma_F (n_factors x n_factors), var_systematic, var_idiosyncratic,
+      pct_systematic, pct_idiosyncratic, var_total.
+
+    Cross-series residual correlation is ignored (matches the equity project's
+    methodology and the spec). The caller should display empirical Var(w' dy)
+    alongside the decomposition total for transparency.
+    """
+    import statsmodels.api as sm
+
+    common = yield_changes.index.intersection(factor_scores.index)
+    Y = yield_changes.loc[common]
+    F = factor_scores.loc[common]
+    w = np.asarray(weights, dtype=float)
+    if w.shape[0] != Y.shape[1]:
+        raise ValueError(f"weights length {w.shape[0]} != n_series {Y.shape[1]}")
+
+    n_series = Y.shape[1]
+    n_factors = F.shape[1]
+    B = np.zeros((n_series, n_factors))
+    resid_var = np.zeros(n_series)
+
+    X = sm.add_constant(F.values)
+    for i, col in enumerate(Y.columns):
+        model = sm.OLS(Y[col].values, X).fit()
+        B[i, :] = model.params[1:]
+        resid_var[i] = model.resid.var(ddof=1)
+
+    Sigma_F = F.cov().values
+    D = np.diag(resid_var)
+
+    var_systematic = float(w @ B @ Sigma_F @ B.T @ w)
+    var_idiosyncratic = float(w @ D @ w)
+    var_total = var_systematic + var_idiosyncratic
+    pct_systematic = 100.0 * var_systematic / var_total
+    pct_idiosyncratic = 100.0 * var_idiosyncratic / var_total
+
+    return {
+        "B": B, "D": D, "Sigma_F": Sigma_F,
+        "var_systematic": var_systematic,
+        "var_idiosyncratic": var_idiosyncratic,
+        "var_total": var_total,
+        "pct_systematic": pct_systematic,
+        "pct_idiosyncratic": pct_idiosyncratic,
+    }
+
+
 def kupiec_pof(returns, VaR, p, alpha=0.05):
     """Kupiec Proportion of Failures test."""
     T = len(returns)
@@ -299,6 +356,54 @@ class TestChristoffersenBacktest:
         assert "LR_ind" in result
         assert "p_value" in result
         assert "reject_independence" in result
+
+
+def test_decomposition_sums_close_to_empirical_variance():
+    """
+    Build a synthetic 3-factor structure with small idiosyncratic noise and
+    check that var_systematic + var_idiosyncratic is within 15% of the
+    empirical variance of the weighted portfolio yield change.
+    """
+    import statsmodels.api as sm
+
+    np.random.seed(123)
+    n = 1500
+    dates = pd.bdate_range("2020-01-01", periods=n)
+
+    # 3 latent factors with distinct variances
+    f1 = np.random.normal(0, 0.05, n)
+    f2 = np.random.normal(0, 0.03, n)
+    f3 = np.random.normal(0, 0.02, n)
+    factors = pd.DataFrame({"PC1": f1, "PC2": f2, "PC3": f3}, index=dates)
+
+    # Country betas (4 x 3) and small idiosyncratic noise
+    betas_true = np.array([
+        [1.0, 0.5, 0.2],
+        [0.8, 0.4, 0.1],
+        [1.2, -0.3, 0.1],
+        [0.7, 0.6, -0.1],
+    ])
+    eps = np.random.normal(0, 0.005, (n, 4))
+    Y = factors.values @ betas_true.T + eps
+    yield_changes = pd.DataFrame(Y, index=dates, columns=["c1", "c2", "c3", "c4"])
+
+    weights = np.array([0.3, 0.25, 0.25, 0.2])
+
+    decomp = compute_factor_idio_decomposition(
+        yield_changes=yield_changes,
+        factor_scores=factors,
+        weights=weights,
+    )
+
+    empirical_var = float(np.var(yield_changes.values @ weights, ddof=1))
+    total = decomp["var_systematic"] + decomp["var_idiosyncratic"]
+
+    assert abs(total - empirical_var) / empirical_var < 0.15, (
+        f"Decomposition sum {total:.6f} vs empirical {empirical_var:.6f} "
+        f"differs by more than 15%"
+    )
+    assert decomp["pct_systematic"] + decomp["pct_idiosyncratic"] == pytest.approx(100.0, abs=1e-6)
+    assert decomp["B"].shape == (4, 3)
 
 
 def test_multi_nu_99var_monotonic_in_nu(portfolio_pnl):

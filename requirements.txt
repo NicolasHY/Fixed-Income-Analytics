@@ -13,3 +13,4 @@ missingno
 pytest
 streamlit
 pyyaml
+statsmodels
