@@ -355,6 +355,8 @@ st.markdown("""
     }
 
     /* ── Main content text (fixes white-on-light background) ── */
+    /* strong/em intentionally excluded — they inherit from parent so dark
+       card inline colors (color:#fff) are not overridden. */
     section[data-testid="stMain"] p,
     section[data-testid="stMain"] li,
     section[data-testid="stMain"] ol,
@@ -362,9 +364,7 @@ st.markdown("""
     section[data-testid="stMain"] h1,
     section[data-testid="stMain"] h2,
     section[data-testid="stMain"] h3,
-    section[data-testid="stMain"] h4,
-    section[data-testid="stMain"] strong,
-    section[data-testid="stMain"] em {
+    section[data-testid="stMain"] h4 {
         color: #1e293b !important;
     }
 
