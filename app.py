@@ -275,8 +275,28 @@ st.markdown("""
         padding: 16px 18px;
         box-shadow: var(--e-1);
         text-align: center;
-        height: 100%;
+        min-height: 228px;
         box-sizing: border-box;
+        flex: 1 1 auto !important;
+    }
+    /* Make the row stretch its columns, and propagate flex down through
+       every wrapper between the column and .health-card so the card
+       actually fills the row's height (not just hits the min-height floor). */
+    [data-testid="stHorizontalBlock"]:has(.health-card) {
+        align-items: stretch !important;
+    }
+    [data-testid="column"]:has(.health-card),
+    [data-testid="column"]:has(.health-card) > div,
+    [data-testid="column"]:has(.health-card) [data-testid="stVerticalBlock"],
+    [data-testid="column"]:has(.health-card) [data-testid="stVerticalBlock"] > div,
+    [data-testid="column"]:has(.health-card) [data-testid="stElementContainer"],
+    [data-testid="column"]:has(.health-card) [data-testid="stMarkdown"],
+    [data-testid="column"]:has(.health-card) [data-testid="stMarkdownContainer"] {
+        display: flex !important;
+        flex-direction: column !important;
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        height: auto !important;
     }
     .health-card .hc-icon { font-size: 2rem; }
     .health-card .hc-name {
@@ -332,6 +352,22 @@ st.markdown("""
         color: var(--c-warn);
         margin-bottom: 14px;
         line-height: 1.55;
+    }
+
+    /* ── Disclaimer footnote (muted, low-emphasis) ── */
+    .disclaimer-footnote {
+        background: transparent;
+        border-top: 1px solid #1b2a3f;
+        padding: 10px 0 0 0;
+        margin-top: 18px;
+        font-size: 0.72rem;
+        color: #5d6e83;
+        line-height: 1.5;
+        font-style: normal;
+    }
+    .disclaimer-footnote strong {
+        color: #7a8a9e;
+        font-weight: 600;
     }
 
     /* ── Info banner (contextual / blue) ── */
@@ -505,6 +541,24 @@ st.markdown("""
         color: #e89a9a !important;
     }
 
+    /* ── Tab headers — equal-width, fully clickable ── */
+    .stTabs [data-baseweb="tab-list"] {
+        display: flex;
+        width: 100%;
+        gap: 0;
+    }
+    .stTabs [data-baseweb="tab-list"] button[data-baseweb="tab"] {
+        flex: 1 1 0;
+        min-width: 0;
+        justify-content: center;
+        text-align: center;
+        padding: 10px 12px;
+    }
+    .stTabs [data-baseweb="tab-list"] button[data-baseweb="tab"] [data-testid="stMarkdownContainer"] {
+        width: 100%;
+        text-align: center;
+    }
+
     /* ── Hide Streamlit branding ── */
     #MainMenu, footer { visibility: hidden; }
     header[data-testid="stHeader"] { background: transparent; }
@@ -518,9 +572,16 @@ PAGES = [
     "VaR Engine", "Portfolios", "Alert History", "Daily Briefings",
 ]
 _NAV_KEY = "_nav"
+_NAV_PENDING_KEY = "_nav_pending"
 
 if _NAV_KEY not in st.session_state:
     st.session_state[_NAV_KEY] = "Home"
+
+# Apply any pending nav request from a previous run (e.g. home-page Open buttons)
+# BEFORE the sidebar radio widget is instantiated with key=_NAV_KEY — otherwise
+# Streamlit raises "cannot modify widget value after instantiation".
+if _NAV_PENDING_KEY in st.session_state:
+    st.session_state[_NAV_KEY] = st.session_state.pop(_NAV_PENDING_KEY)
 
 
 @st.cache_data
@@ -771,22 +832,25 @@ if page == "Home":
                 with st.container(border=True):
                     st.markdown(f"**{_pg}**")
                     st.markdown(
-                        f"<div style='min-height:38px;font-size:0.8rem;"
-                        f"color:#8ab4d4;line-height:1.45;padding:2px 0 6px 0;'>{_ds}</div>",
+                        f"<div style='height:64px;font-size:0.8rem;"
+                        f"color:#8ab4d4;line-height:1.45;padding:2px 0 6px 0;"
+                        f"display:-webkit-box;-webkit-line-clamp:3;"
+                        f"-webkit-box-orient:vertical;overflow:hidden;'>{_ds}</div>",
                         unsafe_allow_html=True,
                     )
                     if st.button("Open →", key=f"navbtn_{_pg}", use_container_width=True):
-                        st.session_state[_NAV_KEY] = _pg
+                        st.session_state[_NAV_PENDING_KEY] = _pg
                         st.rerun()
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
     st.markdown("""
-    <div class='disclaimer-banner'>
-        <strong>Rate &amp; carry proxy</strong> — Metrics are computed from a yield-change
-        duration model with daily coupon accrual added. <strong>FX return is excluded</strong>
-        (a significant driver for the LC fund). The HC fund uses local-currency sovereign yields
-        as a proxy for its USD-denominated holdings — treat its absolute return as an
-        approximation. For verified NAV performance refer to fund factsheets.
+    <div class='disclaimer-footnote'>
+        <strong>A note on the numbers.</strong> Returns and risk figures here come from
+        a duration-based approximation on yield changes, with daily coupon accrual added.
+        FX is not included, which matters quite a bit for the LC fund. For the HC fund,
+        local-currency sovereign yields stand in for the actual USD holdings, so absolute
+        returns are indicative rather than exact. The official factsheets are the source
+        for NAV performance.
     </div>
     """, unsafe_allow_html=True)
 
@@ -828,22 +892,16 @@ elif page == "Pipeline Health":
 
         df_log = pd.DataFrame(log)
 
-        def fmt_status(s):
-            if s == "success":
-                return "✅ success"
-            return "❌ failure"
-
-        df_log["status"] = df_log["status"].map(fmt_status)
         st.dataframe(
             df_log[["step", "status", "runtime_seconds", "output_shape", "error"]],
             use_container_width=True,
             hide_index=True,
             column_config={
-                "step": st.column_config.TextColumn("Step", width="medium"),
+                "step": st.column_config.TextColumn("Step", width="small"),
                 "status": st.column_config.TextColumn("Status", width="small"),
                 "runtime_seconds": st.column_config.NumberColumn("Runtime (s)", format="%.2f", width="small"),
                 "output_shape": st.column_config.TextColumn("Output Shape", width="small"),
-                "error": st.column_config.TextColumn("Error", width="large"),
+                "error": st.column_config.TextColumn("Error", width="small"),
             },
         )
         st.markdown("</div>", unsafe_allow_html=True)
@@ -882,7 +940,7 @@ elif page == "Data Load":
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Country":    st.column_config.TextColumn("Country",    width="medium"),
+                "Country":    st.column_config.TextColumn("Country",    width="small"),
                 "Start":      st.column_config.TextColumn("Start",      width="small"),
                 "End":        st.column_config.TextColumn("End",        width="small"),
                 "Obs":        st.column_config.NumberColumn("Obs",      width="small"),
@@ -896,8 +954,16 @@ elif page == "Data Load":
                                    format_func=lambda c: f"{FLAG.get(c, '')} {c}",
                                    label_visibility="collapsed")
         sel_df = country_dfs[sel_country]
-        st.line_chart(sel_df, use_container_width=True, height=320)
-        st.caption(f"Yield levels (%) — {sel_country} — {len(sel_df)} observations")
+        # Mask non-physical yield ticks (Mexico 30Y has a handful of >95% spikes
+        # from bad Investing.com prints in 2018-2019). Anything above 30% is
+        # well outside even crisis-level EM sovereign yields.
+        sel_df_plot = sel_df.where((sel_df >= -5) & (sel_df <= 30))
+        n_clipped = int(sel_df.notna().sum().sum() - sel_df_plot.notna().sum().sum())
+        st.line_chart(sel_df_plot, use_container_width=True, height=320)
+        caption = f"Yield levels (%) — {sel_country} — {len(sel_df)} observations"
+        if n_clipped:
+            caption += f" ({n_clipped} outlier tick{'s' if n_clipped > 1 else ''} hidden)"
+        st.caption(caption)
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ── PCA & Regime ──────────────────────────────────────────────────────────────
@@ -916,6 +982,7 @@ elif page == "PCA & Regime":
 
     with tab1:
         st.subheader("Per-country PCA loadings")
+        st.caption("How each PC weights the maturities of a single country's curve — typically PC1 ≈ level, PC2 ≈ slope, PC3 ≈ curvature.")
         img = OUT / "pca_loadings.png"
         if img.exists():
             st.image(str(img), use_container_width=True)
@@ -923,6 +990,7 @@ elif page == "PCA & Regime":
             st.warning("pca_loadings.png not found. Run the notebook first.")
 
         st.subheader("Panel PCA loadings (cross-country)")
+        st.caption("How each PC weights every country–maturity pair across the EM panel, surfacing common factors that move yields jointly across markets.")
         img2 = OUT / "pca_panel_loadings.png"
         if img2.exists():
             st.image(str(img2), use_container_width=True)
@@ -931,6 +999,7 @@ elif page == "PCA & Regime":
 
     with tab2:
         st.subheader("PC Score time series — select country")
+        st.caption("Daily values of each PC for the selected country — how strongly level/slope/curvature moves were expressed each day.")
         FLAG2 = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
                   "Colombia": "🇨🇴", "Hungary": "🇭🇺", "Romania": "🇷🇴"}
         sel = st.selectbox("Country", list(PCA_COUNTRY_FILES.keys()),
@@ -944,6 +1013,7 @@ elif page == "PCA & Regime":
 
     with tab3:
         st.subheader("Explained variance by country and panel")
+        st.caption("Share of daily yield-change variance captured by each PC — shows how many components are needed to summarise curve dynamics.")
         img4 = OUT / "pca_explained_variance.png"
         if img4.exists():
             st.image(str(img4), use_container_width=True)
@@ -952,6 +1022,7 @@ elif page == "PCA & Regime":
 
     with tab4:
         st.subheader("GMM Regime classification over time")
+        st.caption("Daily regime labels from a Gaussian Mixture fit on PC scores (k chosen by BIC) — segments history into distinct market states.")
         img5 = OUT / "regime_classification.png"
         if img5.exists():
             st.image(str(img5), use_container_width=True)
@@ -1192,30 +1263,20 @@ elif page == "Portfolios":
     p1 = portfolio_results[0]
     p2 = portfolio_results[1]
 
-    st.markdown("""
-    <div class='disclaimer-banner'>
-        <strong>Rate &amp; carry proxy</strong> — All P&amp;L and performance metrics
-        use a yield-change duration model plus daily coupon accrual
-        (ΔP/P ≈ −D_eff × Δy/100 + y_t/252).
-        <strong>FX return is excluded</strong> — material for the LC fund.
-        The HC fund uses local-currency yields as a proxy for its USD-denominated holdings.
-        Risk metrics (VaR, vol, DV01) are internally consistent with this proxy;
-        return and Sharpe figures are estimates, not NAV-based performance.
-    </div>
-    """, unsafe_allow_html=True)
-
     tab_weights, tab_perf, tab_var, tab_compare, tab_risk = st.tabs(
         ["Weights", "Cumulative Performance", "VaR", "P&L Comparison", "Risk Statistics"]
     )
 
     # ── Weights ──────────────────────────────────────────────────────────────
     with tab_weights:
-        countries = list(p1["def"]["weights"].keys())
-        raw1 = [p1["def"]["weights"][c] for c in countries]
-        raw2 = [p2["def"]["weights"][c] for c in countries]
+        w1 = p1["def"]["weights"]
+        w2 = p2["def"]["weights"]
+        countries = sorted(set(w1) | set(w2))
+        raw1 = [w1.get(c, 0.0) for c in countries]
+        raw2 = [w2.get(c, 0.0) for c in countries]
         tot1, tot2 = sum(raw1), sum(raw2)
-        pct1 = [v / tot1 * 100 for v in raw1]
-        pct2 = [v / tot2 * 100 for v in raw2]
+        pct1 = [v / tot1 * 100 if tot1 else 0.0 for v in raw1]
+        pct2 = [v / tot2 * 100 if tot2 else 0.0 for v in raw2]
 
         fig_w = go.Figure()
         fig_w.add_trace(go.Bar(
@@ -1679,11 +1740,9 @@ elif page == "Portfolios":
             ("Roll-Down Return (est. %)",  _fmt(rs1["rolldown"]),  _fmt(rs2["rolldown"])),
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_ret, use_container_width=True, hide_index=True)
-        st.caption(
-            "Carry = portfolio-weighted latest benchmark yield. "
-            "Roll-down ≈ D_eff × annual curve slope to next shorter maturity, portfolio-weighted. "
-            "South Africa excluded from roll-down (no maturity shorter than 5Y available in data)."
-        )
+        st.caption("Carry = portfolio-weighted latest benchmark yield. Roll-down approximates the 1-year return from rolling down the curve, using each country's par-bond modified duration and the curve slope between the benchmark maturity T and the next-shorter available maturity T*ᵢ:")
+        st.latex(r"\text{Roll-down} \;\approx\; \sum_i w_i \cdot \text{MD}_i \cdot \frac{y_T^{(i)} - y_{T_i^*}^{(i)}}{T - T_i^*}")
+        st.caption("T = portfolio benchmark maturity; T*ᵢ = next-shorter available maturity for country i. South Africa excluded (no maturity shorter than 5Y available in data).")
         st.markdown("</div>", unsafe_allow_html=True)
 
         # ── 2. Risk & Ratio Metrics ────────────────────────────────────────
@@ -1715,12 +1774,10 @@ elif page == "Portfolios":
             ("Calmar Ratio",                    _fmt(rs1["calmar"]),        _fmt(rs2["calmar"])),
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_risk_tbl, use_container_width=True, hide_index=True)
-        st.caption(
-            f"Sharpe and Sortino use daily excess returns over €STR (EUR risk-free, source: FRED). "
-            f"Sortino denominator = annualised downside semi-deviation of excess returns (√(E[min(excess,0)²]) × √252). "
-            f"Calmar = annualised total return / |max drawdown|. "
-            f"rf=0 rows shown for reference."
-        )
+        st.caption("Sharpe and Sortino use daily excess returns over €STR (EUR risk-free, source: FRED). Sortino denominator = annualised downside semi-deviation of excess returns:")
+        st.latex(r"\text{Sortino denominator} \;=\; \sqrt{\mathbb{E}\!\left[\min(\text{excess},\, 0)^2\right]} \cdot \sqrt{252}")
+        st.latex(r"\text{Calmar} \;=\; \frac{\text{Annualised total return}}{\lvert \text{Max drawdown} \rvert}")
+        st.caption("rf = 0 rows shown for reference.")
         st.markdown("</div>", unsafe_allow_html=True)
 
         # ── 3. Bond Analytics ──────────────────────────────────────────────
@@ -1742,13 +1799,12 @@ elif page == "Portfolios":
             ("Yield Curve Slope (long−short, %)",_fmt(rs1["yc_slope"]),         _fmt(rs2["yc_slope"])),
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_bond, use_container_width=True, hide_index=True)
-        st.caption(
-            "Modified Duration = portfolio-weighted average of per-country par bond duration: "
-            "MD_i = [1 − (1 + y_i)^(−T)] / y_i (annual compounding, bond priced at par). "
-            "DV01 (EUR) = MD_portfolio × 0.0001 × AUM. "
-            "Convexity per country: C_i = D_mac_i × (D_mac_i+1) / (1+y_i)², then portfolio-weighted. "
-            "YTM = portfolio-weighted latest benchmark yield."
-        )
+        st.caption("Modified Duration = portfolio-weighted average of per-country par bond duration (annual compounding, bond priced at par):")
+        st.latex(r"\text{MD}_i \;=\; \frac{1 - (1 + y_i)^{-T}}{y_i}")
+        st.latex(r"\text{DV01 (EUR)} \;=\; \text{MD}_{\text{portfolio}} \times 0.0001 \times \text{AUM}")
+        st.caption("Convexity per country (then portfolio-weighted):")
+        st.latex(r"C_i \;=\; \frac{D_{\text{mac},i} \cdot (D_{\text{mac},i} + 1)}{(1 + y_i)^{2}}")
+        st.caption("YTM = portfolio-weighted latest benchmark yield.")
         st.markdown("</div>", unsafe_allow_html=True)
 
         # ── 4. VaR / CVaR ─────────────────────────────────────────────────
@@ -1767,12 +1823,11 @@ elif page == "Portfolios":
                     "MC VaR (%)":     f"{vrow['MC VaR (%)']:.4f}",
                 })
         st.dataframe(pd.DataFrame(var_long), use_container_width=True, hide_index=True)
-        st.caption(
-            "Parametric: Normal P&L assumption, z-score method. "
-            "CVaR (Normal) = −(μ − σ × φ(z_α) / α). "
-            "Historical: empirical quantile / tail mean. "
-            "Monte Carlo: 50,000 draws from N(μ, σ²), seed = 42."
-        )
+        st.caption("Parametric: Normal P&L assumption, z-score method (μ, σ are the sample mean and standard deviation of daily P&L; z_α = Φ⁻¹(α); φ is the standard Normal pdf):")
+        st.latex(r"\text{VaR}_{\text{Normal}} \;=\; -\left(\mu + z_\alpha \cdot \sigma\right)")
+        st.latex(r"\text{CVaR}_{\text{Normal}} \;=\; -\left(\mu - \sigma \cdot \frac{\varphi(z_\alpha)}{\alpha}\right)")
+        st.caption("Historical: empirical α-quantile of P&L for VaR, mean of the left α-tail for CVaR. Monte Carlo: 50,000 draws from a Normal distribution fitted to the sample mean and variance (seed = 42):")
+        st.latex(r"\mathcal{N}\!\left(\mu,\, \sigma^{2}\right)")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='section-card'><h3>VaR & CVaR — Daily (EUR, based on AUM)</h3>", unsafe_allow_html=True)
@@ -1831,12 +1886,11 @@ elif page == "Portfolios":
             f"KRD — {pn2} (yrs)":  [f"{rs2['krd'].get(c, 0):.4f}" for c in all_krd_c],
         })
         st.dataframe(krd_tbl, use_container_width=True, hide_index=True)
-        st.caption(
-            "MD (par bond) = per-country modified duration using latest 5Y yield: "
-            "[1 − (1+y)^(−5)] / y. Both portfolios share the same MD_i; "
-            "KRDs differ only because of different weights. "
-            "KRD_i = w_i × MD_i. Sum = portfolio modified duration."
-        )
+        st.caption("MD (par bond) = per-country modified duration at the benchmark maturity T, using each country's latest benchmark yield (par bond, annual compounding):")
+        st.latex(r"\text{MD}_i \;=\; \frac{1 - (1 + y_i)^{-T}}{y_i}")
+        st.caption("Both portfolios share the same MDᵢ; KRDs differ only because of different weights:")
+        st.latex(r"\text{KRD}_i \;=\; w_i \cdot \text{MD}_i")
+        st.latex(r"\sum_i \text{KRD}_i \;=\; \text{MD}_{\text{portfolio}}")
         st.markdown("</div>", unsafe_allow_html=True)
 
         # ── 6. Country Yield-Change Correlation Matrix ─────────────────────
@@ -1873,6 +1927,22 @@ elif page == "Portfolios":
         else:
             st.warning("Not enough data to build correlation matrix.")
         st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class='disclaimer-footnote'>
+        <strong>Rate &amp; carry proxy.</strong> All P&amp;L and performance metrics
+        use a yield-change duration model plus daily coupon accrual:
+    </div>
+    """, unsafe_allow_html=True)
+    st.latex(r"\frac{\Delta P}{P} \;\approx\; -\,D_{\text{eff}} \cdot \frac{\Delta y}{100} \;+\; \frac{y_t}{252}")
+    st.markdown("""
+    <div class='disclaimer-footnote' style='border-top:none; margin-top:4px; padding-top:0;'>
+        <strong>FX return is excluded</strong> — material for the LC fund.
+        The HC fund uses local-currency yields as a proxy for its USD-denominated holdings.
+        Risk metrics (VaR, vol, DV01) are internally consistent with this proxy;
+        return and Sharpe figures are estimates, not NAV-based performance.
+    </div>
+    """, unsafe_allow_html=True)
 
 # ── Alert History ─────────────────────────────────────────────────────────────
 elif page == "Alert History":
@@ -1959,7 +2029,7 @@ elif page == "Alert History":
                     column_config={
                         "date":     st.column_config.DateColumn("Date", format="YYYY-MM-DD"),
                         "severity": st.column_config.TextColumn("Severity", width="small"),
-                        "type":     st.column_config.TextColumn("Type",     width="medium"),
+                        "type":     st.column_config.TextColumn("Type",     width="small"),
                         "regime":   st.column_config.TextColumn("Regime",   width="small"),
                         "detail":   st.column_config.TextColumn("Detail",   width="large"),
                     },
