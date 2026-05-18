@@ -960,18 +960,32 @@ elif page == "PCA & Regime":
 
 # ── VaR Engine ────────────────────────────────────────────────────────────────
 elif page == "VaR Engine":
-    img_var = OUT / "var_pnl_bands.png"
-    if not img_var.exists():
-        st.warning("var_pnl_bands.png not found. Run Module 2 (VaR Engine) in the notebook first.")
-    else:
-        st.markdown("<div class='section-card'><h3>Portfolio P&L with VaR / CVaR Bands</h3>", unsafe_allow_html=True)
-        st.image(str(img_var), use_container_width=True)
-        st.caption(
-            "LC Fund P&L proxy (duration approximation: ΔP/P ≈ −D_eff × weighted_avg_Δy/100) "
-            "with parametric, historical and Monte Carlo VaR/CVaR bands. "
-            "Backtested via Kupiec POF and Christoffersen independence tests."
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "P&L Bands", "Stressed VaR", "Parametric-t Sensitivity", "Risk Decomposition"
+    ])
+
+    with tab1:
+        img_var = OUT / "var_pnl_bands.png"
+        if not img_var.exists():
+            st.warning("var_pnl_bands.png not found. Run Module 2 (VaR Engine) in the notebook first.")
+        else:
+            st.markdown("<div class='section-card'><h3>Portfolio P&L with VaR / CVaR Bands</h3>", unsafe_allow_html=True)
+            st.image(str(img_var), use_container_width=True)
+            st.caption(
+                "LC Fund P&L proxy (duration approximation: ΔP/P ≈ −D_eff × weighted_avg_Δy/100) "
+                "with parametric, historical and Monte Carlo VaR/CVaR bands. "
+                "Backtested via Kupiec POF and Christoffersen independence tests."
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    with tab2:
+        st.info("Stressed VaR — coming in next commit.")
+
+    with tab3:
+        st.info("Parametric-t sensitivity — coming in next commit.")
+
+    with tab4:
+        st.info("Risk decomposition — coming in next commit.")
 
 # ── Daily Briefings ───────────────────────────────────────────────────────────
 elif page == "Daily Briefings":
