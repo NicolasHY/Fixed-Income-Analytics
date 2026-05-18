@@ -1038,7 +1038,42 @@ elif page == "VaR Engine":
             )
 
     with tab3:
-        st.info("Parametric-t sensitivity — coming in next commit.")
+        data = _load_multi_nu()
+        if data is None:
+            st.warning("Multi-ν parametric-t artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
+        else:
+            table = data["table"]
+            nu_fit = data["nu_fit"]
+            st.markdown(f"**MLE-fitted ν = {nu_fit:.1f}** &nbsp; · &nbsp; comparison grid:")
+            st.dataframe(table.map(lambda x: f"{x:.4%}"), use_container_width=True)
+
+            # 99% VaR vs nu line chart. 'inf' plotted at x=30 with tick labeled '∞'.
+            x_numeric = [4, 5, 8, 20, 30]
+            x_labels = ["4", "5", "8", "20", "∞"]
+            y_99 = table["VaR 99%"].tolist()
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=x_numeric, y=y_99,
+                mode="lines+markers",
+                marker=dict(size=10, color="#1f77b4"),
+                line=dict(color="#1f77b4", width=2),
+                hovertemplate="ν = %{text}<br>99% VaR = %{y:.4%}<extra></extra>",
+                text=x_labels,
+            ))
+            fig.update_layout(
+                title="99% VaR vs degrees of freedom",
+                xaxis=dict(title="ν (Student-t degrees of freedom)",
+                           tickvals=x_numeric, ticktext=x_labels),
+                yaxis=dict(title="99% VaR", tickformat=".2%"),
+                height=420,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.caption(
+                "Variance correction `σ · √((ν−2)/ν)` keeps the scaled-t standard deviation "
+                "matched to the sample, so rows compare like-for-like. Lower ν → fatter tails "
+                "→ larger 99% VaR. The ν → ∞ row reproduces the normal parametric VaR."
+            )
 
     with tab4:
         st.info("Risk decomposition — coming in next commit.")
