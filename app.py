@@ -979,7 +979,63 @@ elif page == "VaR Engine":
             st.markdown("</div>", unsafe_allow_html=True)
 
     with tab2:
-        st.info("Stressed VaR — coming in next commit.")
+        data = _load_stress_data()
+        if data is None:
+            st.warning("Stressed VaR artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
+        else:
+            pnl = data["pnl"]
+            windows = data["windows"]
+            summary = data["summary"]
+            primary = windows["primary_stress"]
+            window_names = list(windows["windows"].keys())
+            selected = st.selectbox(
+                "Stress window to overlay",
+                options=window_names,
+                index=window_names.index(primary),
+            )
+            w = windows["windows"][selected]
+            stress_slice = pnl.loc[w["start"]:w["end"]]
+            VaR_full = windows["reference"]["hist_full_VaR_95"]
+            VaR_param_n = windows["reference"]["parametric_normal_VaR_95"]
+            VaR_stress = w["VaR_95"]
+
+            fig = go.Figure()
+            fig.add_trace(go.Histogram(
+                x=pnl, histnorm="probability density", opacity=0.5,
+                marker_color="#4682B4", name=f"Full sample (n={len(pnl)})",
+                nbinsx=80,
+            ))
+            fig.add_trace(go.Histogram(
+                x=stress_slice, histnorm="probability density", opacity=0.5,
+                marker_color="#DC143C", name=f"{selected} (n={len(stress_slice)})",
+                nbinsx=20,
+            ))
+            fig.add_vline(x=-VaR_full, line_dash="dash", line_color="#4682B4",
+                          annotation_text=f"Hist VaR 95% (full): {VaR_full:.2%}",
+                          annotation_position="top right")
+            fig.add_vline(x=-VaR_param_n, line_dash="dot", line_color="black",
+                          annotation_text=f"Param normal VaR 95%: {VaR_param_n:.2%}",
+                          annotation_position="top right")
+            fig.add_vline(x=-VaR_stress, line_dash="dash", line_color="#DC143C",
+                          annotation_text=f"Stressed VaR 95% ({selected}): {VaR_stress:.2%}",
+                          annotation_position="top right")
+            fig.update_layout(
+                barmode="overlay",
+                title="LC Fund P&L Distribution: Full Sample vs Stress",
+                xaxis_title="Daily portfolio P&L",
+                yaxis_title="Density",
+                legend=dict(x=0.01, y=0.99),
+                height=480,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.dataframe(summary.map(lambda x: f"{x:.4%}"), use_container_width=True)
+
+            ratio_99 = summary.loc["VaR 99%", f"Stressed {selected}"] / summary.loc["VaR 99%", "Historical 3Y"]
+            st.caption(
+                f"{selected} stress 99% VaR is **{ratio_99:.1f}×** the full-sample historical 99% VaR — "
+                "models calibrated on the full sample under-price crisis-conditional tail risk."
+            )
 
     with tab3:
         st.info("Parametric-t sensitivity — coming in next commit.")
