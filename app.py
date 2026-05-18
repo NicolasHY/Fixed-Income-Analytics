@@ -523,6 +523,47 @@ if _NAV_KEY not in st.session_state:
     st.session_state[_NAV_KEY] = "Home"
 
 
+@st.cache_data
+def _load_stress_data():
+    """Load Stressed VaR sidecars. Returns dict or None if any file is missing."""
+    pnl_path = OUT / "var_portfolio_pnl.csv"
+    win_path = OUT / "var_stress_windows.json"
+    sum_path = OUT / "var_stressed_summary.csv"
+    if not (pnl_path.exists() and win_path.exists() and sum_path.exists()):
+        return None
+    pnl = pd.read_csv(pnl_path, index_col=0, parse_dates=True)["pnl"]
+    with open(win_path) as f:
+        windows = json.load(f)
+    summary = pd.read_csv(sum_path, index_col=0)
+    return {"pnl": pnl, "windows": windows, "summary": summary}
+
+
+@st.cache_data
+def _load_multi_nu():
+    """Load multi-nu parametric-t sidecars. Returns dict or None if any file is missing."""
+    table_path = OUT / "var_multi_nu_table.csv"
+    fit_path = OUT / "var_multi_nu_fit.json"
+    if not (table_path.exists() and fit_path.exists()):
+        return None
+    table = pd.read_csv(table_path, index_col=0)
+    with open(fit_path) as f:
+        nu_fit = json.load(f)["nu_fit"]
+    return {"table": table, "nu_fit": nu_fit}
+
+
+@st.cache_data
+def _load_decomposition():
+    """Load PC/idiosyncratic decomposition sidecars. Returns dict or None."""
+    json_path = OUT / "var_decomposition.json"
+    betas_path = OUT / "var_decomposition_betas.csv"
+    if not (json_path.exists() and betas_path.exists()):
+        return None
+    with open(json_path) as f:
+        scalars = json.load(f)
+    betas = pd.read_csv(betas_path, index_col=0)
+    return {"scalars": scalars, "betas": betas}
+
+
 @st.cache_data(show_spinner="Loading portfolio data…")
 def _load_portfolio_data():
     cfg = load_config()
