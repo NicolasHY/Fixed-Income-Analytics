@@ -729,7 +729,11 @@ if page == "Home":
             with _nav_cols[_j]:
                 with st.container(border=True):
                     st.markdown(f"**{_pg}**")
-                    st.caption(_ds)
+                    st.markdown(
+                        f"<div style='min-height:38px;font-size:0.8rem;"
+                        f"color:#8ab4d4;line-height:1.45;padding:2px 0 6px 0;'>{_ds}</div>",
+                        unsafe_allow_html=True,
+                    )
                     if st.button("Open →", key=f"navbtn_{_pg}", use_container_width=True):
                         st.session_state[_NAV_KEY] = _pg
                         st.rerun()
