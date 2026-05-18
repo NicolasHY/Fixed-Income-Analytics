@@ -1,0 +1,12 @@
+{
+  "pct_systematic": 78.74281542092723,
+  "pct_idiosyncratic": 21.257184579072778,
+  "var_total": 0.004121699021447797,
+  "var_empirical": 0.0038454435240402826,
+  "residual_corr_gap_pct": -7.1839696950551435,
+  "pc_cols": [
+    "PC1 (global level)",
+    "PC2 (global slope)",
+    "PC3 (global curvature)"
+  ]
+}
