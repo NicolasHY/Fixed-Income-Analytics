@@ -8,7 +8,9 @@ Run:  streamlit run app.py
 import json
 import os
 import sys
+import threading
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -44,6 +46,69 @@ st.markdown("""
     }
     [data-testid="stSidebar"] .stRadio [data-baseweb="radio"] {
         gap: 12px;
+    }
+
+    /* ── Sidebar nav: turn radio buttons into clickable link rows ── */
+    section[data-testid="stSidebar"] .stRadio > div {
+        gap: 2px !important;
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] {
+        gap: 2px !important;
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
+        display: flex !important;
+        align-items: center;
+        padding: 7px 12px;
+        margin: 0;
+        border-radius: 6px;
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+    /* hide the native radio dot */
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label > div:first-child {
+        display: none !important;
+    }
+    /* chevron indicator */
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label::before {
+        content: "›";
+        color: #4a6a85;
+        margin-right: 10px;
+        font-size: 1.15rem;
+        line-height: 1;
+        transition: color 0.12s ease, transform 0.12s ease;
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label p {
+        color: #8ab4d4 !important;
+        font-size: 0.92rem !important;
+        margin: 0 !important;
+        transition: color 0.12s ease;
+    }
+    /* hover */
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {
+        background: rgba(126,200,227,0.08);
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover::before {
+        color: #7ec8e3;
+        transform: translateX(2px);
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover p {
+        color: #ffffff !important;
+    }
+    /* selected state */
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has([aria-checked="true"]),
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) {
+        background: linear-gradient(90deg, rgba(126,200,227,0.16) 0%, rgba(126,200,227,0) 100%);
+        border-left-color: #7ec8e3;
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has([aria-checked="true"])::before,
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked)::before {
+        color: #7ec8e3;
+    }
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has([aria-checked="true"]) p,
+    section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) p {
+        color: #ffffff !important;
+        font-weight: 600 !important;
     }
 
     /* ── Main background ── */
@@ -257,15 +322,90 @@ st.markdown("""
         font-weight: 600;
     }
 
-    /* ── Home nav container cards hover effect ── */
+    /* ── Home nav container cards ── */
     [data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: #e2e8f0 !important;
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b3a5c 100%) !important;
+        border: 1px solid #1b3a5c !important;
         border-radius: 10px !important;
         transition: box-shadow 0.15s ease, border-color 0.15s ease;
     }
     [data-testid="stVerticalBlockBorderWrapper"]:hover {
-        box-shadow: 0 4px 16px rgba(0,0,0,0.08) !important;
-        border-color: #1b3a5c !important;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.20) !important;
+        border-color: #2e6ea8 !important;
+    }
+    /* Force white text on all child markdown / captions inside the nav cards */
+    [data-testid="stVerticalBlockBorderWrapper"] p,
+    [data-testid="stVerticalBlockBorderWrapper"] strong,
+    [data-testid="stVerticalBlockBorderWrapper"] small,
+    [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stMarkdownContainer"] p,
+    [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCaptionContainer"],
+    [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stCaptionContainer"] p {
+        color: #ffffff !important;
+    }
+
+    /* ── Sidebar: flex layout so the stop-server button can pin to the bottom ── */
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+        display: flex;
+        flex-direction: column;
+        min-height: calc(100vh - 5rem);
+    }
+    .sidebar-spacer {
+        flex: 1 1 auto;
+        min-height: 16px;
+    }
+
+    /* ── Sidebar title ── */
+    .sidebar-title {
+        font-size: 1.3rem;
+        color: #7ec8e3;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        white-space: nowrap;
+        line-height: 1;
+    }
+
+    /* ── Sidebar Universe expander (dark theme override) ── */
+    section[data-testid="stSidebar"] [data-testid="stExpander"] {
+        background: rgba(255,255,255,0.02);
+        border: 1px solid #1e3a5f;
+        border-radius: 6px;
+    }
+    section[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+    section[data-testid="stSidebar"] [data-testid="stExpander"] summary p,
+    section[data-testid="stSidebar"] [data-testid="stExpander"] details > summary span,
+    section[data-testid="stSidebar"] details summary {
+        color: #c9d6e3 !important;
+        font-size: 0.88rem !important;
+        font-weight: 600 !important;
+        text-transform: none;
+        letter-spacing: 0.01em;
+    }
+    section[data-testid="stSidebar"] [data-testid="stExpander"] svg {
+        color: #8ab4d4 !important;
+        fill: #8ab4d4 !important;
+    }
+
+    /* ── Compact "Stop Server" button (sidebar secondary) ── */
+    section[data-testid="stSidebar"] .stButton button[kind="secondary"] {
+        font-size: 0.7rem !important;
+        padding: 3px 12px !important;
+        min-height: 0 !important;
+        height: auto !important;
+        line-height: 1.4 !important;
+        width: auto !important;
+        background: transparent !important;
+        border: 1px solid #3a5577 !important;
+        color: #8ab4d4 !important;
+        opacity: 0.75;
+    }
+    section[data-testid="stSidebar"] .stButton:has(button[kind="secondary"]) {
+        text-align: center;
+        margin-top: 8px;
+    }
+    section[data-testid="stSidebar"] .stButton button[kind="secondary"]:hover {
+        opacity: 1;
+        border-color: #c47a7a !important;
+        color: #e89a9a !important;
     }
 
     /* ── Hide Streamlit branding ── */
@@ -323,8 +463,8 @@ def _load_portfolio_data():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
-    <div style='padding: 10px 0 24px 0;'>
-        <div style='font-size:0.72rem; color:#5a8aaa; letter-spacing:0.08em; text-transform:uppercase;'>EM Fixed Income</div>
+    <div style='padding: 12px 0 22px 0;'>
+        <div class='sidebar-title'>EM Fixed Income</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -338,22 +478,50 @@ with st.sidebar:
 
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
 
-    if st.button("Stop Server", use_container_width=True, type="secondary"):
-        os._exit(0)
+    with st.expander("Investable Universe", expanded=False):
+        st.markdown("""
+        <div style='font-size:0.8rem; color:#8ab4d4; line-height:2;'>
+            🇧🇷 Brazil<br>
+            🇲🇽 Mexico<br>
+            🇿🇦 South Africa<br>
+            🇵🇱 Poland<br>
+            🇨🇴 Colombia<br>
+            🇭🇺 Hungary<br>
+            🇷🇴 Romania
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
-    st.markdown("""
-    <div style='font-size:0.72rem; color:#4a6a85; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px;'>Universe</div>
-    <div style='font-size:0.8rem; color:#8ab4d4; line-height:2;'>
-        🇧🇷 Brazil<br>
-        🇲🇽 Mexico<br>
-        🇿🇦 South Africa<br>
-        🇵🇱 Poland<br>
-        🇨🇴 Colombia<br>
-        🇭🇺 Hungary<br>
-        🇷🇴 Romania
-    </div>
-    """, unsafe_allow_html=True)
+    # Spacer pushes the Stop Server button to the very bottom of the sidebar.
+    st.markdown("<div class='sidebar-spacer'></div>", unsafe_allow_html=True)
+
+    if st.button("Stop Server", key="stop_server_btn", type="secondary"):
+        # Try to close the browser tab (only works on JS-opened windows);
+        # fall back to replacing the page with a "Server stopped" message.
+        components.html(
+            """
+            <script>
+                const finish = () => {
+                    try { window.top.close(); } catch (e) {}
+                    try { window.parent.window.close(); } catch (e) {}
+                    try { window.close(); } catch (e) {}
+                    try {
+                        window.parent.document.documentElement.innerHTML =
+                            '<body style="display:flex;align-items:center;justify-content:center;'
+                          + 'height:100vh;font-family:system-ui,sans-serif;background:#f0f4f8;margin:0;">'
+                          + '<div style="text-align:center;">'
+                          + '<h1 style="color:#0d1b2a;font-size:1.5rem;margin-bottom:8px;">Server stopped</h1>'
+                          + '<p style="color:#64748b;font-size:0.95rem;">You can safely close this tab.</p>'
+                          + '</div></body>';
+                    } catch (e) {}
+                };
+                setTimeout(finish, 300);
+            </script>
+            """,
+            height=0,
+        )
+        # Delay the kill so the browser receives the response and runs the JS.
+        threading.Timer(0.8, lambda: os._exit(0)).start()
+        st.stop()
 
 # ── Page header ───────────────────────────────────────────────────────────────
 st.markdown(f"""
