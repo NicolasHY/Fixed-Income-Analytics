@@ -1076,7 +1076,53 @@ elif page == "VaR Engine":
             )
 
     with tab4:
-        st.info("Risk decomposition — coming in next commit.")
+        data = _load_decomposition()
+        if data is None:
+            st.warning("Decomposition artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
+        else:
+            scalars = data["scalars"]
+            betas = data["betas"]
+
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
+                    x=[scalars["pct_systematic"], scalars["pct_idiosyncratic"]],
+                    y=["Systematic (PCs)", "Idiosyncratic"],
+                    orientation="h",
+                    marker_color=["#1f77b4", "#7f7f7f"],
+                    text=[f"{scalars['pct_systematic']:.2f}%",
+                          f"{scalars['pct_idiosyncratic']:.2f}%"],
+                    textposition="auto",
+                ))
+                fig.update_layout(
+                    title="Daily Yield-Change Variance Decomposition",
+                    xaxis=dict(title="% of total decomposed variance", range=[0, 100]),
+                    height=320,
+                    margin=dict(l=10, r=10, t=50, b=40),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            with col2:
+                st.metric("Decomposition total",   f"{scalars['var_total']:.3e}")
+                st.metric("Empirical Var(w'Δy)",   f"{scalars['var_empirical']:.3e}")
+                st.metric("Residual-corr gap",     f"{scalars['residual_corr_gap_pct']:+.2f}%")
+
+            st.markdown("**β matrix (country × PC):**")
+            st.dataframe(betas.map(lambda x: f"{x:.3f}"), use_container_width=True)
+
+            st.latex(
+                r"\mathrm{Var}(\mathbf{w}^\top \Delta y) "
+                r"= \mathbf{w}^\top B \Sigma_F B^\top \mathbf{w} "
+                r"+ \mathbf{w}^\top D \mathbf{w}"
+            )
+
+            st.caption(
+                f"Systematic share: **{scalars['pct_systematic']:.2f}%** — the fraction of the "
+                "LC fund's daily yield-change variance driven by the global EM rate factors "
+                "(PC1 level, PC2 slope, PC3 curvature). A high systematic share means "
+                "diversification across the four LC countries is limited."
+            )
 
 # ── Daily Briefings ───────────────────────────────────────────────────────────
 elif page == "Daily Briefings":
