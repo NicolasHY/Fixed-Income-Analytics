@@ -58,9 +58,10 @@ st.markdown("""
     }
 
     /* ── Base font ── */
+    /* NOTE: never apply a wildcard font override to the sidebar —
+       Streamlit uses Material Icons there and !important would break them. */
     html, body,
     [data-testid="stMain"] *,
-    [data-testid="stSidebar"] *,
     button, input, select, textarea,
     .stDataFrame, .stDataFrame * {
         font-family: var(--font-ui) !important;
