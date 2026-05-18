@@ -7,12 +7,12 @@
   {
     "check": "Data freshness",
     "status": "YELLOW",
-    "detail": "Latest data: 2026-04-30 (17 days ago)"
+    "detail": "Latest data: 2026-04-30 (18 days ago)"
   },
   {
     "check": "Runtime within bounds",
     "status": "GREEN",
-    "detail": "Slowest step: 1_data_load (0.11s)"
+    "detail": "Slowest step: 1_data_load (0.12s)"
   },
   {
     "check": "VaR 95% breach rate (250d)",
