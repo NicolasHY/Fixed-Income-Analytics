@@ -398,6 +398,16 @@ st.markdown("""
         border: 1px solid #1b3a5c !important;
         border-radius: 10px !important;
         transition: box-shadow 0.15s ease, border-color 0.15s ease;
+        min-height: 148px !important;
+    }
+    /* flex column so the button always pins to the bottom */
+    [data-testid="stVerticalBlockBorderWrapper"] > div[data-testid="stVerticalBlock"] {
+        display: flex !important;
+        flex-direction: column !important;
+        height: 100% !important;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"] > div[data-testid="stVerticalBlock"] .stButton {
+        margin-top: auto !important;
     }
     [data-testid="stVerticalBlockBorderWrapper"]:hover {
         box-shadow: 0 4px 16px rgba(0,0,0,0.20) !important;
