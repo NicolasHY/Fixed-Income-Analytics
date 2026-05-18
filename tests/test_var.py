@@ -35,6 +35,26 @@ def compute_historical_var(pnl_series, window=252, confidence=0.95):
     return {"VaR": var, "CVaR": cvar, "n_obs": len(sample)}
 
 
+def compute_stressed_var(pnl_series, start, end, confidence=0.95):
+    """
+    Historical VaR/CVaR over a stress window.
+
+    pnl_series : pd.Series indexed by date.
+    start, end : window bounds (anything accepted by pandas .loc, inclusive).
+    confidence : confidence level (e.g. 0.95).
+    """
+    sample = pnl_series.loc[start:end]
+    if len(sample) == 0:
+        raise ValueError(f"Empty stress window: {start} to {end}")
+    alpha = 1 - confidence
+    q = np.quantile(sample, alpha)
+    var = -q
+    cvar = -sample[sample <= q].mean()
+    return {"VaR": var, "CVaR": cvar, "n_obs": len(sample),
+            "start": str(sample.index.min().date()),
+            "end": str(sample.index.max().date())}
+
+
 def compute_monte_carlo_var(pnl_series, n_sims=10000, confidence=0.95, seed=42):
     """Monte Carlo VaR under normal assumption."""
     np.random.seed(seed)
@@ -241,8 +261,28 @@ class TestChristoffersenBacktest:
         np.random.seed(42)
         returns = pd.Series(np.random.normal(0, 0.01, 500))
         var = 0.01
-        
+
         result = christoffersen_test(returns, var)
         assert "LR_ind" in result
         assert "p_value" in result
         assert "reject_independence" in result
+
+
+def test_stressed_var_exceeds_full_sample_var(portfolio_pnl):
+    """
+    A stress window constructed from the worst N days must produce a 95%
+    historical VaR no smaller than the full-sample 95% historical VaR.
+    Tests the compute_stressed_var helper, not any specific real-world date.
+    """
+    full = compute_historical_var(portfolio_pnl, window=len(portfolio_pnl), confidence=0.95)
+
+    worst_dates = portfolio_pnl.nsmallest(int(len(portfolio_pnl) * 0.2)).index
+    start, end = worst_dates.min(), worst_dates.max()
+    stressed = compute_stressed_var(portfolio_pnl, start, end, confidence=0.95)
+
+    assert stressed["VaR"] >= full["VaR"] - 1e-9, (
+        f"Stressed VaR ({stressed['VaR']:.6f}) should be >= full-sample VaR "
+        f"({full['VaR']:.6f}) when the window is drawn from the worst tail"
+    )
+    assert stressed["n_obs"] > 0
+    assert stressed["CVaR"] >= stressed["VaR"], "CVaR must be >= VaR"
