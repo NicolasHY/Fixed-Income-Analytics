@@ -25,6 +25,39 @@ def compute_parametric_var(pnl_series, confidence=0.95):
     return {"VaR": var, "CVaR": cvar, "mu": mu, "sigma": sigma}
 
 
+def compute_multi_nu_var_table(pnl_series, nus=(4, 5, 8, 20)):
+    """
+    Parametric VaR/CVaR at 95% and 99% for Student-t with the variance
+    correction scale = sigma * sqrt((nu - 2) / nu), plus a 'inf' (normal) row.
+
+    Returns a DataFrame indexed by nu (with 'inf' as the last row),
+    columns = ['VaR 95%', 'VaR 99%', 'CVaR 95%', 'CVaR 99%'].
+    """
+    mu = pnl_series.mean()
+    sigma = pnl_series.std()
+    rows = []
+    for nu in nus:
+        if nu <= 2:
+            raise ValueError(f"nu must be > 2 for variance correction, got {nu}")
+        s = sigma * np.sqrt((nu - 2) / nu)
+        var_95 = -(mu + t_dist.ppf(0.05, df=nu) * s)
+        var_99 = -(mu + t_dist.ppf(0.01, df=nu) * s)
+        cvar_95 = -pnl_series[pnl_series <= -var_95].mean()
+        cvar_99 = -pnl_series[pnl_series <= -var_99].mean()
+        rows.append([nu, var_95, var_99, cvar_95, cvar_99])
+
+    # Normal row (nu -> infinity)
+    var_95_n = -(mu + norm.ppf(0.05) * sigma)
+    var_99_n = -(mu + norm.ppf(0.01) * sigma)
+    cvar_95_n = -(mu - sigma * norm.pdf(norm.ppf(0.05)) / 0.05)
+    cvar_99_n = -(mu - sigma * norm.pdf(norm.ppf(0.01)) / 0.01)
+    rows.append(["inf", var_95_n, var_99_n, cvar_95_n, cvar_99_n])
+
+    df = pd.DataFrame(rows, columns=["nu", "VaR 95%", "VaR 99%", "CVaR 95%", "CVaR 99%"])
+    df = df.set_index("nu")
+    return df
+
+
 def compute_historical_var(pnl_series, window=252, confidence=0.95):
     """Historical simulation VaR."""
     sample = pnl_series.iloc[-window:]
@@ -266,6 +299,24 @@ class TestChristoffersenBacktest:
         assert "LR_ind" in result
         assert "p_value" in result
         assert "reject_independence" in result
+
+
+def test_multi_nu_99var_monotonic_in_nu(portfolio_pnl):
+    """
+    Higher nu = thinner tails. Holding mu and sigma constant via the variance
+    correction, the 99% parametric-t VaR must shrink as nu increases, and the
+    nu -> infinity row must match the normal parametric VaR.
+    """
+    nus = [4, 5, 8, 20]
+    table = compute_multi_nu_var_table(portfolio_pnl, nus=nus)
+
+    var_99 = [table.loc[nu, "VaR 99%"] for nu in nus]
+    assert all(var_99[i] >= var_99[i + 1] for i in range(len(var_99) - 1)), (
+        f"Expected VaR 99% non-increasing in nu, got {var_99}"
+    )
+
+    normal = compute_parametric_var(portfolio_pnl, confidence=0.99)
+    assert abs(table.loc["inf", "VaR 99%"] - normal["VaR"]) < 1e-9
 
 
 def test_stressed_var_exceeds_full_sample_var(portfolio_pnl):
