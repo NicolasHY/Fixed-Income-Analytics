@@ -20,6 +20,7 @@ from scipy.stats import norm
 sys.path.insert(0, str(Path(__file__).parent))
 from src.data_loader import load_config, load_all_countries_combined, build_portfolio_pnl_from_def, load_country_yields
 from src.risk_free import load_risk_free_rates, align_rf_to_pnl
+from src.ui_theme import apply_theme
 
 st.set_page_config(
     page_title="EM FI Intelligence",
@@ -27,10 +28,44 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+apply_theme()
 
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+    /* ── Design tokens ─────────────────────────────────────────────────── */
+    :root {
+        --font-ui:        "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont,
+                          "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --c-bg:           #f6f8fb;
+        --c-surface:      #ffffff;
+        --c-border:       #e2e8f0;
+        --c-border-soft:  #eef2f7;
+        --c-text:         #0f172a;
+        --c-text-muted:   #64748b;
+        --c-navy-900:     #0d1b2a;
+        --c-navy-700:     #1b3a5c;
+        --c-azure-300:    #7ec8e3;
+        --c-azure-200:    #8ab4d4;
+        --c-warn:         #b45309;
+        --c-warn-soft:    #fef3c7;
+        --c-warn-border:  #fcd34d;
+        --c-info:         #1e40af;
+        --c-info-soft:    #eff6ff;
+        --c-info-border:  #bfdbfe;
+        --e-1:            0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+        --e-2:            0 2px 4px rgba(15,23,42,0.05), 0 4px 12px rgba(15,23,42,0.08);
+    }
+
+    /* ── Base font ── */
+    html, body,
+    [data-testid="stMain"] *,
+    [data-testid="stSidebar"] *,
+    button, input, select, textarea,
+    .stDataFrame, .stDataFrame * {
+        font-family: var(--font-ui) !important;
+    }
+
     /* ── Sidebar ── */
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #0d1b2a 0%, #1b2a3b 100%);
@@ -113,7 +148,7 @@ st.markdown("""
 
     /* ── Main background ── */
     .stApp {
-        background-color: #f0f4f8;
+        background-color: var(--c-bg);
     }
 
     /* ── Top header bar ── */
@@ -171,11 +206,16 @@ st.markdown("""
         background: #ffffff;
         border-radius: 10px;
         padding: 18px 20px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        box-shadow: var(--e-1);
         border-top: 4px solid #1b3a5c;
         text-align: center;
         height: 100%;
         box-sizing: border-box;
+        transition: box-shadow 0.18s ease, transform 0.18s ease;
+    }
+    .stat-card:hover {
+        box-shadow: var(--e-2);
+        transform: translateY(-1px);
     }
     .stat-card .label {
         font-size: 0.78rem;
@@ -214,7 +254,7 @@ st.markdown("""
         background: #ffffff;
         border-radius: 10px;
         padding: 24px 28px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+        box-shadow: var(--e-1);
         margin-bottom: 20px;
     }
     .section-card h3 {
@@ -232,7 +272,7 @@ st.markdown("""
         background: #ffffff;
         border-radius: 10px;
         padding: 16px 18px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+        box-shadow: var(--e-1);
         text-align: center;
         height: 100%;
         box-sizing: border-box;
@@ -260,21 +300,50 @@ st.markdown("""
         background: #ffffff;
         border-radius: 10px;
         padding: 28px 32px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.07);
-        border-left: 5px solid #1b3a5c;
+        box-shadow: var(--e-1);
+        border-left: 5px solid var(--c-azure-300);
         line-height: 1.75;
-        color: #1e293b;
+        color: var(--c-text);
+        font-size: 0.93rem;
     }
 
-    /* ── Event context pill ── */
+    /* ── Event context (reuses info-banner tokens) ── */
     .event-context {
-        background: #eff6ff;
-        border: 1px solid #bfdbfe;
-        border-radius: 8px;
+        background: var(--c-info-soft);
+        border: 1px solid var(--c-info-border);
+        border-left: 3px solid var(--c-info);
+        border-radius: 10px;
         padding: 10px 16px;
         font-size: 0.85rem;
-        color: #1e40af;
+        color: var(--c-info);
         margin-bottom: 16px;
+        line-height: 1.55;
+    }
+
+    /* ── Disclaimer banner (caution / amber) ── */
+    .disclaimer-banner {
+        background: var(--c-warn-soft);
+        border: 1px solid var(--c-warn-border);
+        border-left: 3px solid var(--c-warn);
+        border-radius: 10px;
+        padding: 12px 16px;
+        font-size: 0.82rem;
+        color: var(--c-warn);
+        margin-bottom: 14px;
+        line-height: 1.55;
+    }
+
+    /* ── Info banner (contextual / blue) ── */
+    .info-banner {
+        background: var(--c-info-soft);
+        border: 1px solid var(--c-info-border);
+        border-left: 3px solid var(--c-info);
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-size: 0.85rem;
+        color: var(--c-info);
+        margin-bottom: 12px;
+        line-height: 1.55;
     }
 
     /* ── Divider ── */
@@ -541,8 +610,7 @@ if page == "Home":
     st.markdown("<div class='home-section-label'>Portfolio Snapshot</div>", unsafe_allow_html=True)
 
     st.markdown("""
-    <div style="background:#fefce8; border:1px solid #fde68a; border-radius:8px;
-                padding:10px 16px; font-size:0.82rem; color:#92400e; margin-bottom:14px;">
+    <div class='disclaimer-banner'>
         <strong>Rate &amp; carry proxy</strong> — Metrics are computed from a yield-change
         duration model with daily coupon accrual added. <strong>FX return is excluded</strong>
         (a significant driver for the LC fund). The HC fund uses local-currency sovereign yields
@@ -901,8 +969,7 @@ elif page == "Portfolios":
     p2 = portfolio_results[1]
 
     st.markdown("""
-    <div style="background:#fefce8; border:1px solid #fde68a; border-radius:8px;
-                padding:10px 16px; font-size:0.82rem; color:#92400e; margin-bottom:16px;">
+    <div class='disclaimer-banner'>
         <strong>Rate &amp; carry proxy</strong> — All P&amp;L and performance metrics
         use a yield-change duration model plus daily coupon accrual
         (ΔP/P ≈ −D_eff × Δy/100 + y_t/252).
@@ -1405,8 +1472,7 @@ elif page == "Portfolios":
         # Rate context banner
         if has_rf:
             st.markdown(f"""
-            <div style='background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;
-                        padding:10px 16px;font-size:0.85rem;color:#1e40af;margin-bottom:12px;'>
+            <div class='info-banner'>
                 <strong>Risk-free rates (FRED, latest):</strong>
                 &nbsp; €STR = <strong>{estr_now:.3f}%</strong>
                 &nbsp;|&nbsp; SOFR = <strong>{sofr_now:.3f}%</strong>

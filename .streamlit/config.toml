@@ -1,0 +1,13 @@
+# Native Streamlit theme — keeps inputs, tabs, and dataframes
+# in sync with the brand. See BRAND.md for full token spec.
+[theme]
+base                = "light"
+primaryColor        = "#1b3a5c"
+backgroundColor     = "#f6f8fb"
+secondaryBackgroundColor = "#ffffff"
+textColor           = "#0f172a"
+font                = "sans serif"
+
+[client]
+toolbarMode         = "minimal"
+showErrorDetails    = true
