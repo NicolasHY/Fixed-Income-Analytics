@@ -701,7 +701,7 @@ if page == "Home":
         for _j, (_pg, _ic, _ds) in enumerate(_row):
             with _nav_cols[_j]:
                 with st.container(border=True):
-                    st.markdown(f"**{_ic}&nbsp; {_pg}**")
+                    st.markdown(f"**{_pg}**")
                     st.caption(_ds)
                     if st.button("Open →", key=f"navbtn_{_pg}", use_container_width=True):
                         st.session_state[_NAV_KEY] = _pg
