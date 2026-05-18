@@ -681,16 +681,6 @@ if page == "Home":
     except Exception:
         st.info("Portfolio data not yet available — run the notebook to generate outputs.")
 
-    st.markdown("""
-    <div class='disclaimer-banner'>
-        <strong>Rate &amp; carry proxy</strong> — Metrics are computed from a yield-change
-        duration model with daily coupon accrual added. <strong>FX return is excluded</strong>
-        (a significant driver for the LC fund). The HC fund uses local-currency sovereign yields
-        as a proxy for its USD-denominated holdings — treat its absolute return as an
-        approximation. For verified NAV performance refer to fund factsheets.
-    </div>
-    """, unsafe_allow_html=True)
-
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
     # ── Navigation Grid ───────────────────────────────────────────────────────
@@ -717,6 +707,16 @@ if page == "Home":
                         st.session_state[_NAV_KEY] = _pg
                         st.rerun()
         st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class='disclaimer-banner'>
+        <strong>Rate &amp; carry proxy</strong> — Metrics are computed from a yield-change
+        duration model with daily coupon accrual added. <strong>FX return is excluded</strong>
+        (a significant driver for the LC fund). The HC fund uses local-currency sovereign yields
+        as a proxy for its USD-denominated holdings — treat its absolute return as an
+        approximation. For verified NAV performance refer to fund factsheets.
+    </div>
+    """, unsafe_allow_html=True)
 
 # ── Pipeline Health ───────────────────────────────────────────────────────────
 elif page == "Pipeline Health":
