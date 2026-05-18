@@ -610,16 +610,6 @@ if page == "Home":
     # ── Portfolio Snapshot ────────────────────────────────────────────────────
     st.markdown("<div class='home-section-label'>Portfolio Snapshot</div>", unsafe_allow_html=True)
 
-    st.markdown("""
-    <div class='disclaimer-banner'>
-        <strong>Rate &amp; carry proxy</strong> — Metrics are computed from a yield-change
-        duration model with daily coupon accrual added. <strong>FX return is excluded</strong>
-        (a significant driver for the LC fund). The HC fund uses local-currency sovereign yields
-        as a proxy for its USD-denominated holdings — treat its absolute return as an
-        approximation. For verified NAV performance refer to fund factsheets.
-    </div>
-    """, unsafe_allow_html=True)
-
     try:
         _home_ports = _load_portfolio_data()
         _hp1, _hp2 = _home_ports[0], _home_ports[1]
@@ -690,6 +680,16 @@ if page == "Home":
 
     except Exception:
         st.info("Portfolio data not yet available — run the notebook to generate outputs.")
+
+    st.markdown("""
+    <div class='disclaimer-banner'>
+        <strong>Rate &amp; carry proxy</strong> — Metrics are computed from a yield-change
+        duration model with daily coupon accrual added. <strong>FX return is excluded</strong>
+        (a significant driver for the LC fund). The HC fund uses local-currency sovereign yields
+        as a proxy for its USD-denominated holdings — treat its absolute return as an
+        approximation. For verified NAV performance refer to fund factsheets.
+    </div>
+    """, unsafe_allow_html=True)
 
     st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
 
