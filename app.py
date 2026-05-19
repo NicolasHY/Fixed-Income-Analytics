@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.data_loader import load_config, load_all_countries_combined, build_portfolio_pnl_from_def, load_country_yields
 from src.risk_free import load_risk_free_rates, align_rf_to_pnl
 from src.ui_theme import apply_theme
+import chatbot
 
 st.set_page_config(
     page_title="EM FI Intelligence",
@@ -570,6 +571,7 @@ OUT = Path("data/output")
 PAGES = [
     "Home", "Pipeline Health", "Data Load", "PCA & Regime",
     "VaR Engine", "Portfolios", "Alert History", "Daily Briefings",
+    "Chatbot",
 ]
 _NAV_KEY = "_nav"
 _NAV_PENDING_KEY = "_nav_pending"
@@ -2033,4 +2035,49 @@ elif page == "Alert History":
                         "regime":   st.column_config.TextColumn("Regime",   width="small"),
                         "detail":   st.column_config.TextColumn("Detail",   width="large"),
                     },
+                )
+
+# ── Chatbot ───────────────────────────────────────────────────────────────────
+elif page == "Chatbot":
+    if "chatbot_messages" not in st.session_state:
+        st.session_state["chatbot_messages"] = []
+
+    top_left, top_right = st.columns([5, 1])
+    with top_left:
+        st.markdown(
+            "<div style='color:#64748b; font-size:0.9rem; margin-bottom:8px;'>"
+            "Local assistant — runs on Ollama, no data leaves your machine."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    with top_right:
+        if st.button("Clear conversation", use_container_width=True):
+            st.session_state["chatbot_messages"] = []
+            st.rerun()
+
+    for msg in st.session_state["chatbot_messages"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_input = st.chat_input("Ask anything about the dashboard or general questions…")
+    if user_input:
+        st.session_state["chatbot_messages"].append(
+            {"role": "user", "content": user_input}
+        )
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        with st.chat_message("assistant"):
+            try:
+                reply = st.write_stream(
+                    chatbot.stream_chat(st.session_state["chatbot_messages"])
+                )
+                st.session_state["chatbot_messages"].append(
+                    {"role": "assistant", "content": reply}
+                )
+            except Exception as exc:
+                st.error(
+                    f"Could not reach the local Ollama model "
+                    f"(`{chatbot.MODEL_NAME}`). Is `ollama serve` running and the "
+                    f"model pulled?\n\n**Details:** `{exc}`"
                 )
