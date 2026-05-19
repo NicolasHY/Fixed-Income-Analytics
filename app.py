@@ -2068,14 +2068,27 @@ elif page == "Chatbot":
             st.markdown(user_input)
 
         with st.chat_message("assistant"):
+            placeholder = st.empty()
+            placeholder.markdown(
+                "<span style='color:#64748b; font-style:italic;'>"
+                "Thinking… this usually takes a few seconds."
+                "</span>",
+                unsafe_allow_html=True,
+            )
             try:
-                reply = st.write_stream(
-                    chatbot.stream_chat(st.session_state["chatbot_messages"])
-                )
+                reply = ""
+                for chunk in chatbot.stream_chat(
+                    st.session_state["chatbot_messages"]
+                ):
+                    reply += chunk
+                    placeholder.markdown(reply)
+                if not reply:
+                    placeholder.empty()
                 st.session_state["chatbot_messages"].append(
                     {"role": "assistant", "content": reply}
                 )
             except Exception as exc:
+                placeholder.empty()
                 st.error(
                     f"Could not reach the local Ollama model "
                     f"(`{chatbot.MODEL_NAME}`). Is `ollama serve` running and the "
