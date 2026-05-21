@@ -35,18 +35,28 @@ def test_to_lc_messages_prepends_system_and_maps_roles():
     assert len(msgs) == 4
 
 
-def test_stream_chat_yields_chunk_contents():
-    """stream_chat must unwrap each AIMessageChunk and yield its .content as a string."""
+def test_stream_chat_yields_strings_from_llm_client():
+    """stream_chat delegates to LLMClient.stream() and yields its strings directly.
+
+    Provider-specific chunk-unwrapping (langchain's AIMessageChunk.content,
+    Gemini's response.text) is now the LLMClient's responsibility; the
+    chatbot just forwards strings.
+    """
     import chatbot
+    from src.llm_client import ChatMessage
 
-    fake_chunks = [MagicMock(content="Hel"), MagicMock(content="lo"), MagicMock(content="!")]
-    fake_model = MagicMock()
-    fake_model.stream.return_value = iter(fake_chunks)
+    fake_client = MagicMock()
+    fake_client.stream.return_value = iter(["Hel", "lo", "!"])
 
-    with patch.object(chatbot, "get_chat_model", return_value=fake_model):
+    with patch.object(chatbot, "get_chat_model", return_value=fake_client):
         out = list(chatbot.stream_chat([{"role": "user", "content": "hi"}]))
 
     assert out == ["Hel", "lo", "!"]
-    # Verify the messages passed to .stream() are langchain message objects.
-    sent = fake_model.stream.call_args[0][0]
+    # Messages are now provider-neutral ChatMessage dataclasses with the
+    # system prompt prepended.
+    sent = fake_client.stream.call_args[0][0]
+    assert isinstance(sent[0], ChatMessage)
+    assert sent[0].role == "system"
     assert sent[0].content == chatbot.SYSTEM_PROMPT
+    assert sent[1].role == "user"
+    assert sent[1].content == "hi"

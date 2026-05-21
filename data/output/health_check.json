@@ -12,7 +12,7 @@
   {
     "check": "Runtime within bounds",
     "status": "GREEN",
-    "detail": "Slowest step: 1_data_load (0.12s)"
+    "detail": "Slowest step: 1_data_load (0.11s)"
   },
   {
     "check": "VaR 95% breach rate (250d)",

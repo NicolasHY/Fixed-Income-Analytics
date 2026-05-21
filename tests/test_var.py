@@ -1,216 +1,34 @@
 """
-Tests for Module 2: Multi-Method VaR Engine.
+Tests for the Multi-Method VaR Engine.
 
-Validates the three VaR methodologies (Parametric, Monte Carlo, Historical)
-and the Kupiec/Christoffersen backtesting logic.
+Validates the VaR methodologies (Parametric, Monte Carlo, Historical) and the
+Kupiec / Christoffersen backtesting logic. After the orchestration-step
+extraction these helpers live in ``src/quant/var_engine.py``; this file
+just imports them and runs the same coverage as before.
 """
+from __future__ import annotations
+
+import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
-from scipy.stats import norm, t as t_dist, chi2
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-# ---------------------------------------------------------------------------
-# VaR computation helpers (extracted from notebook logic)
-# ---------------------------------------------------------------------------
-
-def compute_parametric_var(pnl_series, confidence=0.95):
-    """Parametric VaR under normal assumption."""
-    mu = pnl_series.mean()
-    sigma = pnl_series.std()
-    alpha = 1 - confidence
-    var = -(mu + norm.ppf(alpha) * sigma)
-    cvar = -(mu - sigma * norm.pdf(norm.ppf(alpha)) / alpha)
-    return {"VaR": var, "CVaR": cvar, "mu": mu, "sigma": sigma}
-
-
-def compute_multi_nu_var_table(pnl_series, nus=(4, 5, 8, 20)):
-    """
-    Parametric VaR/CVaR at 95% and 99% for Student-t with the variance
-    correction scale = sigma * sqrt((nu - 2) / nu), plus a 'inf' (normal) row.
-
-    Returns a DataFrame indexed by nu (with 'inf' as the last row),
-    columns = ['VaR 95%', 'VaR 99%', 'CVaR 95%', 'CVaR 99%'].
-    """
-    mu = pnl_series.mean()
-    sigma = pnl_series.std()
-    rows = []
-    for nu in nus:
-        if nu <= 2:
-            raise ValueError(f"nu must be > 2 for variance correction, got {nu}")
-        s = sigma * np.sqrt((nu - 2) / nu)
-        var_95 = -(mu + t_dist.ppf(0.05, df=nu) * s)
-        var_99 = -(mu + t_dist.ppf(0.01, df=nu) * s)
-        cvar_95 = -pnl_series[pnl_series <= -var_95].mean()
-        cvar_99 = -pnl_series[pnl_series <= -var_99].mean()
-        rows.append([nu, var_95, var_99, cvar_95, cvar_99])
-
-    # Normal row (nu -> infinity)
-    var_95_n = -(mu + norm.ppf(0.05) * sigma)
-    var_99_n = -(mu + norm.ppf(0.01) * sigma)
-    cvar_95_n = -(mu - sigma * norm.pdf(norm.ppf(0.05)) / 0.05)
-    cvar_99_n = -(mu - sigma * norm.pdf(norm.ppf(0.01)) / 0.01)
-    rows.append(["inf", var_95_n, var_99_n, cvar_95_n, cvar_99_n])
-
-    df = pd.DataFrame(rows, columns=["nu", "VaR 95%", "VaR 99%", "CVaR 95%", "CVaR 99%"])
-    df = df.set_index("nu")
-    return df
-
-
-def compute_historical_var(pnl_series, window=252, confidence=0.95):
-    """Historical simulation VaR."""
-    sample = pnl_series.iloc[-window:]
-    alpha = 1 - confidence
-    q = np.quantile(sample, alpha)
-    var = -q
-    cvar = -sample[sample <= q].mean()
-    return {"VaR": var, "CVaR": cvar, "n_obs": len(sample)}
-
-
-def compute_stressed_var(pnl_series, start, end, confidence=0.95):
-    """
-    Historical VaR/CVaR over a stress window.
-
-    pnl_series : pd.Series indexed by date.
-    start, end : window bounds (anything accepted by pandas .loc, inclusive).
-    confidence : confidence level (e.g. 0.95).
-    """
-    sample = pnl_series.loc[start:end]
-    if len(sample) == 0:
-        raise ValueError(f"Empty stress window: {start} to {end}")
-    alpha = 1 - confidence
-    q = np.quantile(sample, alpha)
-    var = -q
-    cvar = -sample[sample <= q].mean()
-    return {"VaR": var, "CVaR": cvar, "n_obs": len(sample),
-            "start": str(sample.index.min().date()),
-            "end": str(sample.index.max().date())}
-
-
-def compute_monte_carlo_var(pnl_series, n_sims=10000, confidence=0.95, seed=42):
-    """Monte Carlo VaR under normal assumption."""
-    np.random.seed(seed)
-    mu = pnl_series.mean()
-    sigma = pnl_series.std()
-    sim_pnl = np.random.normal(mu, sigma, n_sims)
-    alpha = 1 - confidence
-    q = np.percentile(sim_pnl, alpha * 100)
-    var = -q
-    cvar = -sim_pnl[sim_pnl <= q].mean()
-    return {"VaR": var, "CVaR": cvar, "n_sims": n_sims}
-
-
-def compute_factor_idio_decomposition(yield_changes, factor_scores, weights):
-    """
-    Decompose Var(w' delta_y) into systematic (driven by factor_scores) and
-    idiosyncratic (per-series residual) components via OLS per series.
-
-    yield_changes : DataFrame, columns = series (e.g. countries), index = dates.
-    factor_scores : DataFrame, columns = factors (e.g. PC1/PC2/PC3), index = dates.
-    weights       : 1-D array, same length as yield_changes.columns.
-
-    Returns dict with keys:
-      B (n_series x n_factors), D (n_series x n_series diag of resid variances),
-      Sigma_F (n_factors x n_factors), var_systematic, var_idiosyncratic,
-      pct_systematic, pct_idiosyncratic, var_total.
-
-    Cross-series residual correlation is ignored (matches the equity project's
-    methodology and the spec). The caller should display empirical Var(w' dy)
-    alongside the decomposition total for transparency.
-    """
-    import statsmodels.api as sm
-
-    common = yield_changes.index.intersection(factor_scores.index)
-    Y = yield_changes.loc[common]
-    F = factor_scores.loc[common]
-    w = np.asarray(weights, dtype=float)
-    if w.shape[0] != Y.shape[1]:
-        raise ValueError(f"weights length {w.shape[0]} != n_series {Y.shape[1]}")
-
-    n_series = Y.shape[1]
-    n_factors = F.shape[1]
-    B = np.zeros((n_series, n_factors))
-    resid_var = np.zeros(n_series)
-
-    X = sm.add_constant(F.values)
-    for i, col in enumerate(Y.columns):
-        model = sm.OLS(Y[col].values, X).fit()
-        B[i, :] = model.params[1:]
-        resid_var[i] = model.resid.var(ddof=1)
-
-    Sigma_F = F.cov().values
-    D = np.diag(resid_var)
-
-    var_systematic = float(w @ B @ Sigma_F @ B.T @ w)
-    var_idiosyncratic = float(w @ D @ w)
-    var_total = var_systematic + var_idiosyncratic
-    pct_systematic = 100.0 * var_systematic / var_total
-    pct_idiosyncratic = 100.0 * var_idiosyncratic / var_total
-
-    return {
-        "B": B, "D": D, "Sigma_F": Sigma_F,
-        "var_systematic": var_systematic,
-        "var_idiosyncratic": var_idiosyncratic,
-        "var_total": var_total,
-        "pct_systematic": pct_systematic,
-        "pct_idiosyncratic": pct_idiosyncratic,
-    }
-
-
-def kupiec_pof(returns, VaR, p, alpha=0.05):
-    """Kupiec Proportion of Failures test."""
-    T = len(returns)
-    violations = (returns < -VaR)
-    N = violations.sum()
-    p_hat = N / T
-    
-    if N == 0:
-        LR = -2 * T * np.log(1 - p)
-    elif N == T:
-        LR = -2 * T * np.log(p)
-    else:
-        LR = -2 * (
-            N * np.log(p) + (T - N) * np.log(1 - p)
-            - N * np.log(p_hat) - (T - N) * np.log(1 - p_hat)
-        )
-    
-    p_value = 1 - chi2.cdf(LR, df=1)
-    crit = chi2.ppf(1 - alpha, df=1)
-    reject = LR > crit
-    
-    return {"T": T, "N": N, "expected": p * T, "violation_rate": p_hat,
-            "LR": LR, "p_value": p_value, "reject_H0": reject}
-
-
-def christoffersen_test(returns, VaR, alpha=0.05):
-    """Christoffersen independence test for VaR breach clustering."""
-    violations = (returns < -VaR).astype(int).values
-    T = len(violations)
-    
-    n00 = n01 = n10 = n11 = 0
-    for i in range(1, T):
-        if violations[i-1] == 0 and violations[i] == 0: n00 += 1
-        elif violations[i-1] == 0 and violations[i] == 1: n01 += 1
-        elif violations[i-1] == 1 and violations[i] == 0: n10 += 1
-        elif violations[i-1] == 1 and violations[i] == 1: n11 += 1
-    
-    if n00 + n01 == 0 or n10 + n11 == 0 or n01 + n11 == 0:
-        return {"LR_ind": np.nan, "p_value": np.nan, "reject_independence": False}
-    
-    p01 = n01 / (n00 + n01)
-    p11 = n11 / (n10 + n11)
-    p_hat = (n01 + n11) / (T - 1)
-    
-    L_ind = (n00 + n10) * np.log(1 - p_hat) + (n01 + n11) * np.log(p_hat)
-    L_markov = n00 * np.log(1 - p01) + n01 * np.log(p01)
-    if n10 > 0: L_markov += n10 * np.log(1 - p11)
-    if n11 > 0: L_markov += n11 * np.log(p11)
-    
-    LR_ind = -2 * (L_ind - L_markov)
-    p_value = 1 - chi2.cdf(LR_ind, df=1)
-    
-    return {"LR_ind": LR_ind, "p_value": p_value, "reject_independence": p_value < alpha}
+from src.quant.var_engine import (
+    christoffersen_test,
+    compute_factor_idio_decomposition,
+    compute_historical_var,
+    compute_monte_carlo_var,
+    compute_multi_nu_var_table,
+    compute_parametric_var,
+    compute_stressed_var,
+    kupiec_pof,
+)
 
 
 # ===========================================================================

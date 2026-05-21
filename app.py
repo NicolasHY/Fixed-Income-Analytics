@@ -19,7 +19,18 @@ from scipy.stats import norm
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.data_loader import load_config, load_all_countries_combined, build_portfolio_pnl_from_def, load_country_yields
+from src.data import load_briefings as _load_briefings_from_disk
+from src.data.var_artifacts import (
+    load_alert_history as _load_alert_history_from_disk,
+    load_country_outputs as _load_country_outputs_from_disk,
+    load_decomposition as _load_decomposition_from_disk,
+    load_health_check as _load_health_check_from_disk,
+    load_multi_nu as _load_multi_nu_from_disk,
+    load_pipeline_log as _load_pipeline_log_from_disk,
+    load_stress_data as _load_stress_data_from_disk,
+)
 from src.risk_free import load_risk_free_rates, align_rf_to_pnl
+from src.services.portfolios import build_portfolio_views, compute_quick_stats
 from src.ui_theme import apply_theme
 import chatbot
 
@@ -586,79 +597,29 @@ if _NAV_PENDING_KEY in st.session_state:
     st.session_state[_NAV_KEY] = st.session_state.pop(_NAV_PENDING_KEY)
 
 
+# Streamlit-cached wrappers around the Data + Services layers. The actual
+# JSON/CSV parsing and portfolio carry math live in src/data/var_artifacts.py
+# and src/services/portfolios.py — these wrappers only own the @st.cache_data
+# session caching the dashboard needs.
+
 @st.cache_data
 def _load_stress_data():
-    """Load Stressed VaR sidecars. Returns dict or None if any file is missing."""
-    pnl_path = OUT / "var_portfolio_pnl.csv"
-    win_path = OUT / "var_stress_windows.json"
-    sum_path = OUT / "var_stressed_summary.csv"
-    if not (pnl_path.exists() and win_path.exists() and sum_path.exists()):
-        return None
-    pnl = pd.read_csv(pnl_path, index_col=0, parse_dates=True)["pnl"]
-    with open(win_path) as f:
-        windows = json.load(f)
-    summary = pd.read_csv(sum_path, index_col=0)
-    return {"pnl": pnl, "windows": windows, "summary": summary}
+    return _load_stress_data_from_disk(OUT)
 
 
 @st.cache_data
 def _load_multi_nu():
-    """Load multi-nu parametric-t sidecars. Returns dict or None if any file is missing."""
-    table_path = OUT / "var_multi_nu_table.csv"
-    fit_path = OUT / "var_multi_nu_fit.json"
-    if not (table_path.exists() and fit_path.exists()):
-        return None
-    table = pd.read_csv(table_path, index_col=0)
-    with open(fit_path) as f:
-        nu_fit = json.load(f)["nu_fit"]
-    return {"table": table, "nu_fit": nu_fit}
+    return _load_multi_nu_from_disk(OUT)
 
 
 @st.cache_data
 def _load_decomposition():
-    """Load PC/idiosyncratic decomposition sidecars. Returns dict or None."""
-    json_path = OUT / "var_decomposition.json"
-    betas_path = OUT / "var_decomposition_betas.csv"
-    if not (json_path.exists() and betas_path.exists()):
-        return None
-    with open(json_path) as f:
-        scalars = json.load(f)
-    betas = pd.read_csv(betas_path, index_col=0)
-    return {"scalars": scalars, "betas": betas}
+    return _load_decomposition_from_disk(OUT)
 
 
 @st.cache_data(show_spinner="Loading portfolio data…")
 def _load_portfolio_data():
-    cfg = load_config()
-    change_dfs = load_all_countries_combined(cfg, data_dir="data/raw")
-    results = []
-    for pdef in cfg["portfolios"]:
-        pnl, proxy_dy = build_portfolio_pnl_from_def(change_dfs, pdef)
-
-        # ── Add daily carry: portfolio-weighted benchmark yield / 252 ─────────
-        # Converts the pure rate-change proxy into a total-return proxy.
-        # For the HC fund this uses local-currency yields as a carry approximation
-        # (actual USD bond yields are lower — the proxy remains an estimate).
-        mat = pdef["benchmark_maturity"]
-        raw_w = pdef["weights"]
-        tot_w = sum(raw_w.values())
-        w_norm = {k: v / tot_w for k, v in raw_w.items()}
-        carry_parts: dict[str, pd.Series] = {}
-        for country, wt in w_norm.items():
-            try:
-                lvl = load_country_yields(country, data_dir="data/raw")
-                if mat in lvl.columns:
-                    carry_parts[country] = lvl[mat] * wt
-            except Exception:
-                pass
-        if carry_parts:
-            port_yield_pct = (
-                pd.DataFrame(carry_parts).sum(axis=1).reindex(pnl.index).ffill()
-            )
-            pnl = pnl + (port_yield_pct / 100 / 252)
-
-        results.append({"def": pdef, "pnl": pnl, "proxy_dy": proxy_dy})
-    return results
+    return build_portfolio_views()
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -745,23 +706,8 @@ if page == "Home":
         _home_ports = _load_portfolio_data()
         _hp1, _hp2 = _home_ports[0], _home_ports[1]
 
-        def _quick_stats(pnl):
-            n = len(pnl)
-            ann = np.sqrt(252)
-            ret = float(((1 + pnl).prod() ** (252 / n) - 1) * 100)
-            vol = float(pnl.std() * ann * 100)
-            sharpe = ret / vol if vol > 0 else np.nan
-            cum = float(((1 + pnl).cumprod() - 1).iloc[-1] * 100)
-            roll = (1 + pnl).cumprod()
-            dd = float(((roll / roll.cummax()) - 1).min() * 100)
-            var95 = float(-(pnl.mean() + norm.ppf(0.05) * pnl.std()) * 100)
-            start = pnl.index.min().strftime("%b %Y")
-            end   = pnl.index.max().strftime("%b %Y")
-            return {"ret": ret, "vol": vol, "sharpe": sharpe, "cum": cum,
-                    "dd": dd, "var95": var95, "start": start, "end": end}
-
-        _hqs1 = _quick_stats(_hp1["pnl"])
-        _hqs2 = _quick_stats(_hp2["pnl"])
+        _hqs1 = compute_quick_stats(_hp1["pnl"])
+        _hqs2 = compute_quick_stats(_hp2["pnl"])
 
         pc_col1, pc_col2 = st.columns(2)
         for _col, _pdata, _qs in [(pc_col1, _hp1, _hqs1), (pc_col2, _hp2, _hqs2)]:
@@ -858,13 +804,10 @@ if page == "Home":
 
 # ── Pipeline Health ───────────────────────────────────────────────────────────
 elif page == "Pipeline Health":
-    health_path = OUT / "health_check.json"
-    if not health_path.exists():
+    checks = _load_health_check_from_disk(OUT)
+    if checks is None:
         st.warning("health_check.json not found. Run Module 4 (Pipeline Health Monitor) first.")
     else:
-        with open(health_path) as f:
-            checks = json.load(f)
-
         COLOR_MAP = {
             "GREEN":  ("🟢", "hc-status' style='color:#16a34a", "pill-green"),
             "YELLOW": ("🟡", "hc-status' style='color:#d97706", "pill-yellow"),
@@ -884,11 +827,8 @@ elif page == "Pipeline Health":
                 </div>
                 """, unsafe_allow_html=True)
 
-    log_path = OUT / "pipeline_log.json"
-    if log_path.exists():
-        with open(log_path) as f:
-            log = json.load(f)
-
+    log = _load_pipeline_log_from_disk(OUT)
+    if log is not None:
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
         st.markdown("<div class='section-card'><h3>Step-by-step Execution Log</h3>", unsafe_allow_html=True)
 
@@ -914,16 +854,9 @@ elif page == "Data Load":
     FLAG = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
              "Colombia": "🇨🇴", "Hungary": "🇭🇺", "Romania": "🇷🇴"}
 
+    country_dfs, missing = _load_country_outputs_from_disk(COUNTRIES, OUT)
     summary_rows = []
-    country_dfs = {}
-    missing = []
-    for country in COUNTRIES:
-        path = OUT / f"{country}.csv"
-        if not path.exists():
-            missing.append(country)
-            continue
-        df = pd.read_csv(path, index_col=0, parse_dates=True)
-        country_dfs[country] = df
+    for country, df in country_dfs.items():
         summary_rows.append({
             "Country": f"{FLAG.get(country, '')} {country}",
             "Start": df.index.min().strftime("%Y-%m-%d"),
@@ -1199,13 +1132,10 @@ elif page == "VaR Engine":
 
 # ── Daily Briefings ───────────────────────────────────────────────────────────
 elif page == "Daily Briefings":
-    briefings_path = OUT / "sample_briefings.json"
-    if not briefings_path.exists():
+    briefings = _load_briefings_from_disk(OUT / "sample_briefings.json")
+    if not briefings:
         st.warning("sample_briefings.json not found. Run Module 3 (Daily Briefing Engine) first.")
     else:
-        with open(briefings_path) as f:
-            briefings = json.load(f)
-
         EVENT_META = {
             "2022-03-18": ("Post-Russia invasion EM stress",      "Elevated EM sovereign risk amid sanctions fallout and commodity shock"),
             "2022-09-23": ("UK gilt crisis / EM contagion",        "LDI-driven gilt sell-off sparking global EM spread widening"),
@@ -1948,13 +1878,10 @@ elif page == "Portfolios":
 
 # ── Alert History ─────────────────────────────────────────────────────────────
 elif page == "Alert History":
-    alert_path = OUT / "alert_history.json"
-    if not alert_path.exists():
+    alerts = _load_alert_history_from_disk(OUT)
+    if alerts is None:
         st.warning("alert_history.json not found. Run Module 1.4 (Alert Engine) first.")
     else:
-        with open(alert_path) as f:
-            alerts = json.load(f)
-
         records = []
         for date_str, payload in alerts.items():
             for alert in payload.get("alerts", []):
