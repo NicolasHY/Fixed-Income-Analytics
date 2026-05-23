@@ -1,5 +1,5 @@
 # ============================================================================
-# Company EM Fixed Income Intelligence Platform — Configuration
+# EM Fixed Income Intelligence Platform — Configuration
 # ============================================================================
 # Centralized metadata for the analytical pipeline.
 # All country/fund/threshold parameters are defined here to keep
@@ -27,10 +27,10 @@ excluded_series:
   Romania: ["1Y"]
 
 # ---------------------------------------------------------------------------
-# LC Fund proxy parameters (Company L Bonds Emerging Markets Sust. — PLBEMSA)
+# LC Fund proxy parameters (EM Local Currency Sustainable — PLBEMSA)
 # ---------------------------------------------------------------------------
 lc_fund:
-  name: "Company L Bonds Emerging Markets Sustainable"
+  name: "EM Local Currency Bonds Sustainable"
   ticker: "PLBEMSA"
   weights:
     Brazil: 10.1
@@ -122,7 +122,7 @@ pipeline:
 # ---------------------------------------------------------------------------
 # Multi-portfolio definitions
 # ---------------------------------------------------------------------------
-# Weights are sourced from Research_Notes_2026-05-13.md (Bloomberg PORT,
+# Weights are sourced from internal research notes (Bloomberg PORT,
 # holdings/allocations as of 10/31/2025). Only countries present in data/raw/
 # are included; off-universe holdings (Jordan, Montenegro, Bahamas, Indonesia,
 # etc.) are omitted. Weights are raw % from the fund report and are normalised

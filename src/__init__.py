@@ -1,5 +1,5 @@
 """
-Company EM Fixed Income Intelligence Platform — Source Package.
+EM Fixed Income Intelligence Platform — Source Package.
 
 Public import surface for the analytical pipeline.
 All parameters are read from config/funds.yaml — no hardcoded numbers.

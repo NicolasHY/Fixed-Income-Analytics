@@ -1,4 +1,4 @@
-"""Generate the desktop-shortcut icon for the Company Dashboard.
+"""Generate the desktop-shortcut icon for the Dashboard.
 
 Draws a candlestick chart on a dark navy background and writes a
 multi-resolution .ico file at assets/app_icon.ico.

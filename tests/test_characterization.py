@@ -1,5 +1,5 @@
 """
-Characterization tests for the Company EM FI platform.
+Characterization tests for the EM FI platform.
 
 Purpose
 -------

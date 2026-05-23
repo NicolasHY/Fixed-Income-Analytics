@@ -54,6 +54,6 @@ _COMPANY_TEMPLATE = go.layout.Template(
 
 
 def apply_theme() -> None:
-    """Register and activate the Company Plotly template."""
+    """Register and activate the company Plotly template."""
     pio.templates["company"] = _COMPANY_TEMPLATE
     pio.templates.default = "company"

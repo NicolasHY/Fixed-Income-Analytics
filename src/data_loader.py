@@ -1,7 +1,7 @@
 """
 Module: data_loader.py
 ======================
-Handles all data ingestion and preprocessing for the Company EM FI platform.
+Handles all data ingestion and preprocessing for the EM FI platform.
 
 Raw data layout (from Investing.com downloads):
     data/raw/<Country>/<Country> <N>-Year Bond Yield Historical Data.csv

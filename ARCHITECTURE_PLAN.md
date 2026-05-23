@@ -1,6 +1,6 @@
 # Architecture Plan — Mapping to the 5-Layer GenAI Architecture
 
-This document maps the current Company EM FI codebase onto the canonical
+This document maps the current EM FI codebase onto the canonical
 five-layer GenAI architecture and flags the tight-coupling points that must
 be broken before a refactor.
 

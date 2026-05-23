@@ -99,7 +99,7 @@ Same excess-return series as above. Downside semi-deviation = `√(E[min(excess,
 ### Modified Duration
 - **Implementation**: Uses `D_eff = 5.22` from `config/funds.yaml` — a **constant** for both portfolios.
 - **Approximations**:
-  - This is the **effective duration** of the benchmark LC fund (Company PLBEMSA), not re-derived from the actual bond universe.
+  - This is the **effective duration** of the benchmark LC fund (PLBEMSA), not re-derived from the actual bond universe.
   - Modified duration changes over time as yields move and bonds age; this implementation treats it as fixed.
   - Both portfolios use the same `D_eff` because the config does not specify per-portfolio durations. Portfolio 2 (South Africa-heavy) likely has a **different** modified duration since South Africa's curve has a different shape.
 - **Missing data**:
