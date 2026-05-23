@@ -19,6 +19,13 @@ from .risk_free import (
     daily_rf_from_annual,
     align_rf_to_pnl,
 )
+from .config import (
+    ConfigError,
+    GeminiConfig,
+    build_gemini_client,
+    get_gemini_config,
+    resolve_secret,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -39,4 +46,10 @@ __all__ = [
     "load_risk_free_rates",
     "daily_rf_from_annual",
     "align_rf_to_pnl",
+    # infrastructure / config
+    "ConfigError",
+    "GeminiConfig",
+    "resolve_secret",
+    "get_gemini_config",
+    "build_gemini_client",
 ]
