@@ -28,7 +28,7 @@ data/removed/
 Dockerfile
 CLAUDE.md
 run_dashboard.bat
-README.md
+README.local.md
 
 # Local tooling
 .claude/
