@@ -1357,6 +1357,42 @@ elif page == "Portfolios":
     rs1 = compute_risk_stats(p1["def"], p1["pnl"], yield_levels, rf_data)
     rs2 = compute_risk_stats(p2["def"], p2["pnl"], yield_levels, rf_data)
 
+    # ── Quarterly export control bar ──────────────────────────────────────────
+    quarters = get_available_quarters(p1["pnl"])
+    if quarters:
+        st.markdown(
+            "<div class='section-card' style='padding:16px 24px; margin-bottom:16px;'>"
+            "<h3 style='margin-bottom:12px;'>Quarterly Report Export</h3>",
+            unsafe_allow_html=True,
+        )
+        _exp_col1, _exp_col2 = st.columns([3, 1])
+        with _exp_col1:
+            _q_idx = st.selectbox(
+                "Select quarter",
+                range(len(quarters)),
+                format_func=lambda i: quarters[i]["label"],
+                label_visibility="visible",
+            )
+        with _exp_col2:
+            _q = quarters[_q_idx]
+            _q_num = (_q["start"].month - 1) // 3 + 1
+            _fname = f"EM_FI_Q{_q_num}_{_q['start'].year}_Report.xlsx"
+            _report_bytes = _cached_report(
+                _q["start"].isoformat(),
+                _q["end"].isoformat(),
+                _RAW_VER,
+            )
+            st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
+            st.download_button(
+                label="Export Quarterly Report",
+                data=_report_bytes,
+                file_name=_fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                help=f"Download {_q['label']} as a pre-filled Excel report.",
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
     tab_weights, tab_perf, tab_var, tab_compare, tab_risk = st.tabs(
         ["Weights", "Cumulative Performance", "VaR", "P&L Comparison", "Risk Statistics"]
     )
