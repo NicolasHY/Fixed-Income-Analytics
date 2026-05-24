@@ -19,7 +19,7 @@ from scipy.stats import norm
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.data_loader import load_config, load_all_countries_combined, build_portfolio_pnl_from_def, load_country_yields
-from src.data import load_briefings as _load_briefings_from_disk
+from src.data import load_briefings as _load_briefings_from_disk, data_version
 from src.data.var_artifacts import (
     load_alert_history as _load_alert_history_from_disk,
     load_country_outputs as _load_country_outputs_from_disk,
@@ -602,23 +602,31 @@ if _NAV_PENDING_KEY in st.session_state:
 # and src/services/portfolios.py — these wrappers only own the @st.cache_data
 # session caching the dashboard needs.
 
+# Data-version cache keys — recomputed every rerun (cheap, stat-only).
+# Passing these into a cached loader as a regular (non-underscore)
+# argument makes Streamlit fold them into the cache key, so the cache
+# auto-invalidates whenever the notebook regenerates the data files.
+_OUT_VER = data_version(OUT)
+_RAW_VER = data_version("data/raw")
+
+
 @st.cache_data
-def _load_stress_data():
+def _load_stress_data(version):
     return _load_stress_data_from_disk(OUT)
 
 
 @st.cache_data
-def _load_multi_nu():
+def _load_multi_nu(version):
     return _load_multi_nu_from_disk(OUT)
 
 
 @st.cache_data
-def _load_decomposition():
+def _load_decomposition(version):
     return _load_decomposition_from_disk(OUT)
 
 
-@st.cache_data(show_spinner="Loading portfolio data…")
-def _load_portfolio_data():
+@st.cache_data(show_spinner="Loading portfolio data…", persist="disk")
+def _load_portfolio_data(version):
     return build_portfolio_views()
 
 
@@ -703,7 +711,7 @@ if page == "Home":
     st.markdown("<div class='home-section-label'>Portfolio Snapshot</div>", unsafe_allow_html=True)
 
     try:
-        _home_ports = _load_portfolio_data()
+        _home_ports = _load_portfolio_data(_RAW_VER)
         _hp1, _hp2 = _home_ports[0], _home_ports[1]
 
         _hqs1 = compute_quick_stats(_hp1["pnl"])
@@ -985,7 +993,7 @@ elif page == "VaR Engine":
             st.markdown("</div>", unsafe_allow_html=True)
 
     with tab2:
-        data = _load_stress_data()
+        data = _load_stress_data(_OUT_VER)
         if data is None:
             st.warning("Stressed VaR artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
         else:
@@ -1044,7 +1052,7 @@ elif page == "VaR Engine":
             )
 
     with tab3:
-        data = _load_multi_nu()
+        data = _load_multi_nu(_OUT_VER)
         if data is None:
             st.warning("Multi-ν parametric-t artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
         else:
@@ -1082,7 +1090,7 @@ elif page == "VaR Engine":
             )
 
     with tab4:
-        data = _load_decomposition()
+        data = _load_decomposition(_OUT_VER)
         if data is None:
             st.warning("Decomposition artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
         else:
@@ -1187,7 +1195,7 @@ elif page == "Portfolios":
     PORT_COLORS = ["#1b3a5c", "#e67e22"]
 
     try:
-        portfolio_results = _load_portfolio_data()
+        portfolio_results = _load_portfolio_data(_RAW_VER)
     except Exception as exc:
         st.error(f"Could not load portfolio data: {exc}")
         st.stop()
