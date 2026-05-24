@@ -606,6 +606,10 @@ if _NAV_PENDING_KEY in st.session_state:
 # Passing these into a cached loader as a regular (non-underscore)
 # argument makes Streamlit fold them into the cache key, so the cache
 # auto-invalidates whenever the notebook regenerates the data files.
+# Note: persist="disk" caches survive a server restart, so they also
+# survive code changes to the underlying loader modules (the cache key
+# hashes the wrapper body, not the imported helpers). After pulling new
+# code, use the sidebar "Refresh data" button to force a rebuild.
 _OUT_VER = data_version(OUT)
 _RAW_VER = data_version("data/raw")
 
@@ -1681,6 +1685,11 @@ elif page == "Portfolios":
                 current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
             )
 
+        # Keyed on _OUT_VER because the rf rates live in data/output. If the
+        # CSV is missing, load_risk_free_rates fetches from FRED and writes it
+        # there — bumping _OUT_VER on the next rerun and busting the output
+        # caches once. This is first-run-only and never serves stale data; the
+        # repo ships risk_free_rates.csv, so the FRED branch is normally dead.
         @st.cache_data(show_spinner="Loading risk-free rates…", persist="disk")
         def _load_rf_data(version):
             cfg = load_config()
