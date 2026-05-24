@@ -19,7 +19,7 @@ from scipy.stats import norm
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.data_loader import load_config, load_all_countries_combined, build_portfolio_pnl_from_def, load_country_yields
-from src.data import load_briefings as _load_briefings_from_disk
+from src.data import load_briefings as _load_briefings_from_disk, data_version
 from src.data.var_artifacts import (
     load_alert_history as _load_alert_history_from_disk,
     load_country_outputs as _load_country_outputs_from_disk,
@@ -602,24 +602,61 @@ if _NAV_PENDING_KEY in st.session_state:
 # and src/services/portfolios.py — these wrappers only own the @st.cache_data
 # session caching the dashboard needs.
 
+# Data-version cache keys — recomputed every rerun (cheap, stat-only).
+# Passing these into a cached loader as a regular (non-underscore)
+# argument makes Streamlit fold them into the cache key, so the cache
+# auto-invalidates whenever the notebook regenerates the data files.
+# Note: persist="disk" caches survive a server restart, so they also
+# survive code changes to the underlying loader modules (the cache key
+# hashes the wrapper body, not the imported helpers). After pulling new
+# code, use the sidebar "Refresh data" button to force a rebuild.
+_OUT_VER = data_version(OUT)
+_RAW_VER = data_version("data/raw")
+
+
 @st.cache_data
-def _load_stress_data():
+def _load_stress_data(version):
     return _load_stress_data_from_disk(OUT)
 
 
 @st.cache_data
-def _load_multi_nu():
+def _load_multi_nu(version):
     return _load_multi_nu_from_disk(OUT)
 
 
 @st.cache_data
-def _load_decomposition():
+def _load_decomposition(version):
     return _load_decomposition_from_disk(OUT)
 
 
-@st.cache_data(show_spinner="Loading portfolio data…")
-def _load_portfolio_data():
+@st.cache_data(show_spinner="Loading portfolio data…", persist="disk")
+def _load_portfolio_data(version):
     return build_portfolio_views()
+
+
+@st.cache_data
+def _load_health_check(version):
+    return _load_health_check_from_disk(OUT)
+
+
+@st.cache_data
+def _load_pipeline_log(version):
+    return _load_pipeline_log_from_disk(OUT)
+
+
+@st.cache_data
+def _load_country_outputs(countries, version):
+    return _load_country_outputs_from_disk(list(countries), OUT)
+
+
+@st.cache_data
+def _load_alert_history(version):
+    return _load_alert_history_from_disk(OUT)
+
+
+@st.cache_data
+def _load_briefings(version):
+    return _load_briefings_from_disk(OUT / "sample_briefings.json")
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -655,6 +692,10 @@ with st.sidebar:
 
     # Spacer pushes the Stop Server button to the very bottom of the sidebar.
     st.markdown("<div class='sidebar-spacer'></div>", unsafe_allow_html=True)
+
+    if st.button("Refresh data", key="refresh_data_btn", type="secondary"):
+        st.cache_data.clear()
+        st.rerun()
 
     if st.button("Stop Server", key="stop_server_btn", type="secondary"):
         # Try to close the browser tab (only works on JS-opened windows);
@@ -703,7 +744,7 @@ if page == "Home":
     st.markdown("<div class='home-section-label'>Portfolio Snapshot</div>", unsafe_allow_html=True)
 
     try:
-        _home_ports = _load_portfolio_data()
+        _home_ports = _load_portfolio_data(_RAW_VER)
         _hp1, _hp2 = _home_ports[0], _home_ports[1]
 
         _hqs1 = compute_quick_stats(_hp1["pnl"])
@@ -804,7 +845,7 @@ if page == "Home":
 
 # ── Pipeline Health ───────────────────────────────────────────────────────────
 elif page == "Pipeline Health":
-    checks = _load_health_check_from_disk(OUT)
+    checks = _load_health_check(_OUT_VER)
     if checks is None:
         st.warning("health_check.json not found. Run Module 4 (Pipeline Health Monitor) first.")
     else:
@@ -827,7 +868,7 @@ elif page == "Pipeline Health":
                 </div>
                 """, unsafe_allow_html=True)
 
-    log = _load_pipeline_log_from_disk(OUT)
+    log = _load_pipeline_log(_OUT_VER)
     if log is not None:
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
         st.markdown("<div class='section-card'><h3>Step-by-step Execution Log</h3>", unsafe_allow_html=True)
@@ -854,7 +895,7 @@ elif page == "Data Load":
     FLAG = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
              "Colombia": "🇨🇴", "Hungary": "🇭🇺", "Romania": "🇷🇴"}
 
-    country_dfs, missing = _load_country_outputs_from_disk(COUNTRIES, OUT)
+    country_dfs, missing = _load_country_outputs(tuple(COUNTRIES), _OUT_VER)
     summary_rows = []
     for country, df in country_dfs.items():
         summary_rows.append({
@@ -985,7 +1026,7 @@ elif page == "VaR Engine":
             st.markdown("</div>", unsafe_allow_html=True)
 
     with tab2:
-        data = _load_stress_data()
+        data = _load_stress_data(_OUT_VER)
         if data is None:
             st.warning("Stressed VaR artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
         else:
@@ -1044,7 +1085,7 @@ elif page == "VaR Engine":
             )
 
     with tab3:
-        data = _load_multi_nu()
+        data = _load_multi_nu(_OUT_VER)
         if data is None:
             st.warning("Multi-ν parametric-t artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
         else:
@@ -1082,7 +1123,7 @@ elif page == "VaR Engine":
             )
 
     with tab4:
-        data = _load_decomposition()
+        data = _load_decomposition(_OUT_VER)
         if data is None:
             st.warning("Decomposition artifacts not found. Run Module 2 (VaR Engine) in the notebook first.")
         else:
@@ -1132,7 +1173,7 @@ elif page == "VaR Engine":
 
 # ── Daily Briefings ───────────────────────────────────────────────────────────
 elif page == "Daily Briefings":
-    briefings = _load_briefings_from_disk(OUT / "sample_briefings.json")
+    briefings = _load_briefings(_OUT_VER)
     if not briefings:
         st.warning("sample_briefings.json not found. Run Module 3 (Daily Briefing Engine) first.")
     else:
@@ -1187,7 +1228,7 @@ elif page == "Portfolios":
     PORT_COLORS = ["#1b3a5c", "#e67e22"]
 
     try:
-        portfolio_results = _load_portfolio_data()
+        portfolio_results = _load_portfolio_data(_RAW_VER)
     except Exception as exc:
         st.error(f"Could not load portfolio data: {exc}")
         st.stop()
@@ -1434,8 +1475,8 @@ elif page == "Portfolios":
     # ── Risk Statistics ───────────────────────────────────────────────────────
     with tab_risk:
 
-        @st.cache_data(show_spinner="Loading yield levels…")
-        def _load_yield_levels():
+        @st.cache_data(show_spinner="Loading yield levels…", persist="disk")
+        def _load_yield_levels(version):
             cfg = load_config()
             all_c = cfg["countries"]["local_currency"] + cfg["countries"]["hard_currency"]
             excluded = cfg.get("excluded_series", {})
@@ -1451,7 +1492,7 @@ elif page == "Portfolios":
             return out
 
         try:
-            yield_levels = _load_yield_levels()
+            yield_levels = _load_yield_levels(_RAW_VER)
         except Exception as _ye:
             st.warning(f"Could not load yield levels: {_ye}")
             yield_levels = {}
@@ -1644,8 +1685,13 @@ elif page == "Portfolios":
                 current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
             )
 
-        @st.cache_data(show_spinner="Loading risk-free rates…")
-        def _load_rf_data():
+        # Keyed on _OUT_VER because the rf rates live in data/output. If the
+        # CSV is missing, load_risk_free_rates fetches from FRED and writes it
+        # there — bumping _OUT_VER on the next rerun and busting the output
+        # caches once. This is first-run-only and never serves stale data; the
+        # repo ships risk_free_rates.csv, so the FRED branch is normally dead.
+        @st.cache_data(show_spinner="Loading risk-free rates…", persist="disk")
+        def _load_rf_data(version):
             cfg = load_config()
             key_path = cfg.get("fred", {}).get("key_path", "private/fred_key.txt")
             out_path  = cfg.get("fred", {}).get("output_path", "data/output/risk_free_rates.csv")
@@ -1655,7 +1701,7 @@ elif page == "Portfolios":
             except Exception:
                 return None
 
-        rf_data = _load_rf_data()
+        rf_data = _load_rf_data(_OUT_VER)
         rs1 = _risk_stats(p1["def"], p1["pnl"], yield_levels, rf_data)
         rs2 = _risk_stats(p2["def"], p2["pnl"], yield_levels, rf_data)
         pn1, pn2 = p1["def"]["name"], p2["def"]["name"]
@@ -1878,7 +1924,7 @@ elif page == "Portfolios":
 
 # ── Alert History ─────────────────────────────────────────────────────────────
 elif page == "Alert History":
-    alerts = _load_alert_history_from_disk(OUT)
+    alerts = _load_alert_history(_OUT_VER)
     if alerts is None:
         st.warning("alert_history.json not found. Run Module 1.4 (Alert Engine) first.")
     else:

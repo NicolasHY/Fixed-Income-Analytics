@@ -33,6 +33,7 @@ from src.data.var_artifacts import (
     load_pipeline_log,
     load_stress_data,
 )
+from src.data.cache_keys import data_version
 
 __all__ = [
     "build_daily_payload",
@@ -47,4 +48,5 @@ __all__ = [
     "load_health_check",
     "load_alert_history",
     "load_country_outputs",
+    "data_version",
 ]
