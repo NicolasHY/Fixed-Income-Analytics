@@ -689,6 +689,10 @@ with st.sidebar:
     # Spacer pushes the Stop Server button to the very bottom of the sidebar.
     st.markdown("<div class='sidebar-spacer'></div>", unsafe_allow_html=True)
 
+    if st.button("Refresh data", key="refresh_data_btn", type="secondary"):
+        st.cache_data.clear()
+        st.rerun()
+
     if st.button("Stop Server", key="stop_server_btn", type="secondary"):
         # Try to close the browser tab (only works on JS-opened windows);
         # fall back to replacing the page with a "Server stopped" message.
