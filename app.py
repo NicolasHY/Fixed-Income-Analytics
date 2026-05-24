@@ -630,6 +630,31 @@ def _load_portfolio_data(version):
     return build_portfolio_views()
 
 
+@st.cache_data
+def _load_health_check(version):
+    return _load_health_check_from_disk(OUT)
+
+
+@st.cache_data
+def _load_pipeline_log(version):
+    return _load_pipeline_log_from_disk(OUT)
+
+
+@st.cache_data
+def _load_country_outputs(countries, version):
+    return _load_country_outputs_from_disk(list(countries), OUT)
+
+
+@st.cache_data
+def _load_alert_history(version):
+    return _load_alert_history_from_disk(OUT)
+
+
+@st.cache_data
+def _load_briefings(version):
+    return _load_briefings_from_disk(OUT / "sample_briefings.json")
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
@@ -812,7 +837,7 @@ if page == "Home":
 
 # ── Pipeline Health ───────────────────────────────────────────────────────────
 elif page == "Pipeline Health":
-    checks = _load_health_check_from_disk(OUT)
+    checks = _load_health_check(_OUT_VER)
     if checks is None:
         st.warning("health_check.json not found. Run Module 4 (Pipeline Health Monitor) first.")
     else:
@@ -835,7 +860,7 @@ elif page == "Pipeline Health":
                 </div>
                 """, unsafe_allow_html=True)
 
-    log = _load_pipeline_log_from_disk(OUT)
+    log = _load_pipeline_log(_OUT_VER)
     if log is not None:
         st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
         st.markdown("<div class='section-card'><h3>Step-by-step Execution Log</h3>", unsafe_allow_html=True)
@@ -862,7 +887,7 @@ elif page == "Data Load":
     FLAG = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
              "Colombia": "🇨🇴", "Hungary": "🇭🇺", "Romania": "🇷🇴"}
 
-    country_dfs, missing = _load_country_outputs_from_disk(COUNTRIES, OUT)
+    country_dfs, missing = _load_country_outputs(tuple(COUNTRIES), _OUT_VER)
     summary_rows = []
     for country, df in country_dfs.items():
         summary_rows.append({
@@ -1140,7 +1165,7 @@ elif page == "VaR Engine":
 
 # ── Daily Briefings ───────────────────────────────────────────────────────────
 elif page == "Daily Briefings":
-    briefings = _load_briefings_from_disk(OUT / "sample_briefings.json")
+    briefings = _load_briefings(_OUT_VER)
     if not briefings:
         st.warning("sample_briefings.json not found. Run Module 3 (Daily Briefing Engine) first.")
     else:
@@ -1886,7 +1911,7 @@ elif page == "Portfolios":
 
 # ── Alert History ─────────────────────────────────────────────────────────────
 elif page == "Alert History":
-    alerts = _load_alert_history_from_disk(OUT)
+    alerts = _load_alert_history(_OUT_VER)
     if alerts is None:
         st.warning("alert_history.json not found. Run Module 1.4 (Alert Engine) first.")
     else:
