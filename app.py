@@ -36,14 +36,8 @@ import chatbot
 
 st.set_page_config(
     page_title="EM FI Intelligence",
-    page_icon=(
-        "data:image/svg+xml,"
-        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
-        "<rect width='32' height='32' rx='7' fill='%230d1b2a'/>"
-        "<polyline points='6,21 13,14 18,18 26,8' fill='none' stroke='%237ec8e3'"
-        " stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/>"
-        "</svg>"
-    ),
+    # Empty transparent SVG → blank tab icon (suppresses the Streamlit default).
+    page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/>",
     layout="wide",
     initial_sidebar_state="expanded",
 )
