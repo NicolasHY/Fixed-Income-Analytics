@@ -689,7 +689,8 @@ def _csv_download(df, filename, *, key, label="⬇ Download CSV", index=False):
     """
     st.download_button(
         label,
-        df.to_csv(index=index).encode("utf-8"),
+        # utf-8-sig writes a BOM so Excel renders €, em-dashes, etc. correctly.
+        df.to_csv(index=index).encode("utf-8-sig"),
         file_name=filename,
         mime="text/csv",
         key=key,
@@ -986,7 +987,12 @@ elif page == "Data Load":
                 "Maturities": st.column_config.TextColumn("Maturities", width="large"),
             },
         )
-        _csv_download(pd.DataFrame(summary_rows), "data_load_summary.csv", key="dl_data_summary")
+        # Export plain country names (the displayed table prepends a flag emoji).
+        _csv_download(
+            pd.DataFrame(summary_rows).assign(Country=list(country_dfs.keys())),
+            "data_load_summary.csv",
+            key="dl_data_summary",
+        )
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='section-card'><h3>Yield Levels — Select Country</h3>", unsafe_allow_html=True)
@@ -1945,7 +1951,12 @@ elif page == "Portfolios":
             f"KRD — {pn2} (yrs)":  [f"{rs2['krd'].get(c, 0):.4f}" for c in all_krd_c],
         })
         st.dataframe(krd_tbl, use_container_width=True, hide_index=True)
-        _csv_download(krd_tbl, "portfolio_key_rate_duration.csv", key="dl_pf_krd")
+        # Export plain country names (krd_labels prepend a flag emoji for display).
+        _csv_download(
+            krd_tbl.assign(Country=all_krd_c),
+            "portfolio_key_rate_duration.csv",
+            key="dl_pf_krd",
+        )
         st.caption("MD (par bond) = per-country modified duration at the benchmark maturity T, using each country's latest benchmark yield (par bond, annual compounding):")
         st.latex(r"\text{MD}_i \;=\; \frac{1 - (1 + y_i)^{-T}}{y_i}")
         st.caption("Both portfolios share the same MDᵢ; KRDs differ only because of different weights:")
