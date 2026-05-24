@@ -36,7 +36,14 @@ import chatbot
 
 st.set_page_config(
     page_title="EM FI Intelligence",
-    page_icon="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/>",
+    page_icon=(
+        "data:image/svg+xml,"
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+        "<rect width='32' height='32' rx='7' fill='%230d1b2a'/>"
+        "<polyline points='6,21 13,14 18,18 26,8' fill='none' stroke='%237ec8e3'"
+        " stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/>"
+        "</svg>"
+    ),
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -574,10 +581,24 @@ st.markdown("""
     /* ── Hide Streamlit branding ── */
     #MainMenu, footer { visibility: hidden; }
     header[data-testid="stHeader"] { background: transparent; }
+
+    /* ── App footer (custom; replaces hidden Streamlit footer) ── */
+    .app-footer {
+        margin: 48px 0 8px 0;
+        padding-top: 16px;
+        border-top: 1px solid var(--c-border);
+        text-align: center;
+        font-size: 0.74rem;
+        letter-spacing: 0.02em;
+        color: var(--c-text-muted);
+    }
 </style>
 """, unsafe_allow_html=True)
 
 OUT = Path("data/output")
+
+# Editable build tag shown in the page footer. Bump on notable releases.
+APP_VERSION = "1.0"
 
 PAGES = [
     "Home", "Pipeline Health", "Data Load", "PCA & Regime",
@@ -614,17 +635,17 @@ _OUT_VER = data_version(OUT)
 _RAW_VER = data_version("data/raw")
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading stress scenarios…")
 def _load_stress_data(version):
     return _load_stress_data_from_disk(OUT)
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading parametric-t grid…")
 def _load_multi_nu(version):
     return _load_multi_nu_from_disk(OUT)
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading variance decomposition…")
 def _load_decomposition(version):
     return _load_decomposition_from_disk(OUT)
 
@@ -634,29 +655,60 @@ def _load_portfolio_data(version):
     return build_portfolio_views()
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading pipeline health…")
 def _load_health_check(version):
     return _load_health_check_from_disk(OUT)
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading execution log…")
 def _load_pipeline_log(version):
     return _load_pipeline_log_from_disk(OUT)
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading country data…")
 def _load_country_outputs(countries, version):
     return _load_country_outputs_from_disk(list(countries), OUT)
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading alert history…")
 def _load_alert_history(version):
     return _load_alert_history_from_disk(OUT)
 
 
-@st.cache_data
+@st.cache_data(show_spinner="Loading briefings…")
 def _load_briefings(version):
     return _load_briefings_from_disk(OUT / "sample_briefings.json")
+
+
+# ── Shared UI helpers ───────────────────────────────────────────────────────────
+def _csv_download(df, filename, *, key, label="⬇ Download CSV", index=False):
+    """Render a compact CSV export button for a displayed table.
+
+    Pass the raw (numeric) DataFrame, not a string-formatted display copy, so the
+    exported file keeps full precision.
+    """
+    st.download_button(
+        label,
+        df.to_csv(index=index).encode("utf-8"),
+        file_name=filename,
+        mime="text/csv",
+        key=key,
+        help=f"Export this table as {filename}",
+    )
+
+
+def _page_footer():
+    """Slim, consistent footer rendered at the bottom of every page."""
+    st.markdown(
+        f"""
+        <div class='app-footer'>
+            EM Fixed Income Intelligence Platform
+            &nbsp;·&nbsp; v{APP_VERSION}
+            &nbsp;·&nbsp; Internal use only — not investment advice
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -693,11 +745,22 @@ with st.sidebar:
     # Spacer pushes the Stop Server button to the very bottom of the sidebar.
     st.markdown("<div class='sidebar-spacer'></div>", unsafe_allow_html=True)
 
-    if st.button("Refresh data", key="refresh_data_btn", type="secondary"):
+    if st.button(
+        "Refresh data",
+        key="refresh_data_btn",
+        type="secondary",
+        help="Clear cached data and reload the latest analytics outputs from disk.",
+    ):
         st.cache_data.clear()
+        st.toast("Data caches cleared — reloading latest outputs.", icon="✅")
         st.rerun()
 
-    if st.button("Stop Server", key="stop_server_btn", type="secondary"):
+    if st.button(
+        "Stop Server",
+        key="stop_server_btn",
+        type="secondary",
+        help="Shut down the dashboard server and close this tab.",
+    ):
         # Try to close the browser tab (only works on JS-opened windows);
         # fall back to replacing the page with a "Server stopped" message.
         components.html(
@@ -923,6 +986,7 @@ elif page == "Data Load":
                 "Maturities": st.column_config.TextColumn("Maturities", width="large"),
             },
         )
+        _csv_download(pd.DataFrame(summary_rows), "data_load_summary.csv", key="dl_data_summary")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='section-card'><h3>Yield Levels — Select Country</h3>", unsafe_allow_html=True)
@@ -940,6 +1004,12 @@ elif page == "Data Load":
         if n_clipped:
             caption += f" ({n_clipped} outlier tick{'s' if n_clipped > 1 else ''} hidden)"
         st.caption(caption)
+        _csv_download(
+            sel_df,
+            f"yields_{sel_country.replace(' ', '_')}.csv",
+            key="dl_country_yields",
+            index=True,
+        )
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ── PCA & Regime ──────────────────────────────────────────────────────────────
@@ -1077,6 +1147,7 @@ elif page == "VaR Engine":
             st.plotly_chart(fig, use_container_width=True)
 
             st.dataframe(summary.map(lambda x: f"{x:.4%}"), use_container_width=True)
+            _csv_download(summary, "var_stress_summary.csv", key="dl_var_stress", index=True)
 
             ratio_99 = summary.loc["VaR 99%", f"Stressed {selected}"] / summary.loc["VaR 99%", "Historical 3Y"]
             st.caption(
@@ -1093,6 +1164,7 @@ elif page == "VaR Engine":
             nu_fit = data["nu_fit"]
             st.markdown(f"**MLE-fitted ν = {nu_fit:.1f}** &nbsp; · &nbsp; comparison grid:")
             st.dataframe(table.map(lambda x: f"{x:.4%}"), use_container_width=True)
+            _csv_download(table, "var_multi_nu_table.csv", key="dl_var_nu", index=True)
 
             # 99% VaR vs nu line chart. 'inf' plotted at x=30 with tick labeled '∞'.
             x_numeric = [4, 5, 8, 20, 30]
@@ -1151,12 +1223,13 @@ elif page == "VaR Engine":
                 st.plotly_chart(fig, use_container_width=True)
 
             with col2:
-                st.metric("Decomposition total",   f"{scalars['var_total']:.3e}")
-                st.metric("Empirical Var(w'Δy)",   f"{scalars['var_empirical']:.3e}")
+                st.metric("Decomposition total",   f"{scalars['var_total']:.4g}")
+                st.metric("Empirical Var(w'Δy)",   f"{scalars['var_empirical']:.4g}")
                 st.metric("Residual-corr gap",     f"{scalars['residual_corr_gap_pct']:+.2f}%")
 
             st.markdown("**β matrix (country × PC):**")
             st.dataframe(betas.map(lambda x: f"{x:.3f}"), use_container_width=True)
+            _csv_download(betas, "var_decomposition_betas.csv", key="dl_var_betas", index=True)
 
             st.latex(
                 r"\mathrm{Var}(\mathbf{w}^\top \Delta y) "
@@ -1284,6 +1357,7 @@ elif page == "Portfolios":
         })
         st.markdown("<div class='section-card'><h3>Weight Table</h3>", unsafe_allow_html=True)
         st.dataframe(df_w, use_container_width=True, hide_index=True)
+        _csv_download(df_w, "portfolio_weights.csv", key="dl_pf_weights")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ── Cumulative Performance ────────────────────────────────────────────────
@@ -1359,6 +1433,7 @@ elif page == "Portfolios":
         })
         st.markdown("<div class='section-card'><h3>Performance Summary</h3>", unsafe_allow_html=True)
         st.dataframe(df_stats, use_container_width=True, hide_index=True)
+        _csv_download(df_stats, "portfolio_performance_summary.csv", key="dl_pf_perf")
         st.markdown("</div>", unsafe_allow_html=True)
 
     # ── VaR ──────────────────────────────────────────────────────────────────
@@ -1395,6 +1470,7 @@ elif page == "Portfolios":
         df_var = pd.DataFrame(rows)
         st.markdown("<div class='section-card'><h3>Daily VaR & CVaR (as % of portfolio value)</h3>", unsafe_allow_html=True)
         st.dataframe(df_var, use_container_width=True, hide_index=True)
+        _csv_download(df_var, "portfolio_var_cvar_summary.csv", key="dl_pf_var_summary")
         st.caption("Parametric VaR assumes normally distributed daily P&L. Historical VaR uses empirical quantiles.")
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1718,6 +1794,7 @@ elif page == "Portfolios":
             ("Roll-Down Return (est. %)",  _fmt(rs1["rolldown"]),  _fmt(rs2["rolldown"])),
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_ret, use_container_width=True, hide_index=True)
+        _csv_download(df_ret, "portfolio_return_metrics.csv", key="dl_pf_ret")
         st.caption("Carry = portfolio-weighted latest benchmark yield. Roll-down approximates the 1-year return from rolling down the curve, using each country's par-bond modified duration and the curve slope between the benchmark maturity T and the next-shorter available maturity T*ᵢ:")
         st.latex(r"\text{Roll-down} \;\approx\; \sum_i w_i \cdot \text{MD}_i \cdot \frac{y_T^{(i)} - y_{T_i^*}^{(i)}}{T - T_i^*}")
         st.caption("T = portfolio benchmark maturity; T*ᵢ = next-shorter available maturity for country i. South Africa excluded (no maturity shorter than 5Y available in data).")
@@ -1752,6 +1829,7 @@ elif page == "Portfolios":
             ("Calmar Ratio",                    _fmt(rs1["calmar"]),        _fmt(rs2["calmar"])),
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_risk_tbl, use_container_width=True, hide_index=True)
+        _csv_download(df_risk_tbl, "portfolio_risk_metrics.csv", key="dl_pf_risk")
         st.caption("Sharpe and Sortino use daily excess returns over €STR (EUR risk-free, source: FRED). Sortino denominator = annualised downside semi-deviation of excess returns:")
         st.latex(r"\text{Sortino denominator} \;=\; \sqrt{\mathbb{E}\!\left[\min(\text{excess},\, 0)^2\right]} \cdot \sqrt{252}")
         st.latex(r"\text{Calmar} \;=\; \frac{\text{Annualised total return}}{\lvert \text{Max drawdown} \rvert}")
@@ -1777,6 +1855,7 @@ elif page == "Portfolios":
             ("Yield Curve Slope (long−short, %)",_fmt(rs1["yc_slope"]),         _fmt(rs2["yc_slope"])),
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_bond, use_container_width=True, hide_index=True)
+        _csv_download(df_bond, "portfolio_bond_analytics.csv", key="dl_pf_bond")
         st.caption("Modified Duration = portfolio-weighted average of per-country par bond duration (annual compounding, bond priced at par):")
         st.latex(r"\text{MD}_i \;=\; \frac{1 - (1 + y_i)^{-T}}{y_i}")
         st.latex(r"\text{DV01 (EUR)} \;=\; \text{MD}_{\text{portfolio}} \times 0.0001 \times \text{AUM}")
@@ -1801,6 +1880,7 @@ elif page == "Portfolios":
                     "MC VaR (%)":     f"{vrow['MC VaR (%)']:.4f}",
                 })
         st.dataframe(pd.DataFrame(var_long), use_container_width=True, hide_index=True)
+        _csv_download(pd.DataFrame(var_long), "portfolio_var_cvar_pct.csv", key="dl_pf_var_pct")
         st.caption("Parametric: Normal P&L assumption, z-score method (μ, σ are the sample mean and standard deviation of daily P&L; z_α = Φ⁻¹(α); φ is the standard Normal pdf):")
         st.latex(r"\text{VaR}_{\text{Normal}} \;=\; -\left(\mu + z_\alpha \cdot \sigma\right)")
         st.latex(r"\text{CVaR}_{\text{Normal}} \;=\; -\left(\mu - \sigma \cdot \frac{\varphi(z_\alpha)}{\alpha}\right)")
@@ -1822,6 +1902,7 @@ elif page == "Portfolios":
                     "MC VaR (EUR)":     _fmt_eur(vrow["MC VaR (EUR)"]),
                 })
         st.dataframe(pd.DataFrame(var_eur_long), use_container_width=True, hide_index=True)
+        _csv_download(pd.DataFrame(var_eur_long), "portfolio_var_cvar_eur.csv", key="dl_pf_var_eur")
         st.caption(
             f"EUR VaR = VaR (%) × AUM. "
             f"AUM: {pn1} = {_fmt_eur(rs1['aum'])}, {pn2} = {_fmt_eur(rs2['aum'])}."
@@ -1864,6 +1945,7 @@ elif page == "Portfolios":
             f"KRD — {pn2} (yrs)":  [f"{rs2['krd'].get(c, 0):.4f}" for c in all_krd_c],
         })
         st.dataframe(krd_tbl, use_container_width=True, hide_index=True)
+        _csv_download(krd_tbl, "portfolio_key_rate_duration.csv", key="dl_pf_krd")
         st.caption("MD (par bond) = per-country modified duration at the benchmark maturity T, using each country's latest benchmark yield (par bond, annual compounding):")
         st.latex(r"\text{MD}_i \;=\; \frac{1 - (1 + y_i)^{-T}}{y_i}")
         st.caption("Both portfolios share the same MDᵢ; KRDs differ only because of different weights:")
@@ -2009,6 +2091,11 @@ elif page == "Alert History":
                         "detail":   st.column_config.TextColumn("Detail",   width="large"),
                     },
                 )
+                _csv_download(
+                    filtered[["date", "severity", "type", "regime", "detail"]],
+                    "alert_history.csv",
+                    key="dl_alerts",
+                )
 
 # ── Chatbot ───────────────────────────────────────────────────────────────────
 elif page == "Chatbot":
@@ -2024,8 +2111,13 @@ elif page == "Chatbot":
             unsafe_allow_html=True,
         )
     with top_right:
-        if st.button("Clear conversation", use_container_width=True):
+        if st.button(
+            "Clear conversation",
+            use_container_width=True,
+            help="Delete all messages in this chat and start over.",
+        ):
             st.session_state["chatbot_messages"] = []
+            st.toast("Conversation cleared.", icon="🗑️")
             st.rerun()
 
     for msg in st.session_state["chatbot_messages"]:
@@ -2067,3 +2159,6 @@ elif page == "Chatbot":
                     f"(`{chatbot.MODEL_NAME}`). Is `ollama serve` running and the "
                     f"model pulled?\n\n**Details:** `{exc}`"
                 )
+
+# ── Footer (rendered on every page) ─────────────────────────────────────────────
+_page_footer()
