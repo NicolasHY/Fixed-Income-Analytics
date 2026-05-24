@@ -1467,8 +1467,8 @@ elif page == "Portfolios":
     # ── Risk Statistics ───────────────────────────────────────────────────────
     with tab_risk:
 
-        @st.cache_data(show_spinner="Loading yield levels…")
-        def _load_yield_levels():
+        @st.cache_data(show_spinner="Loading yield levels…", persist="disk")
+        def _load_yield_levels(version):
             cfg = load_config()
             all_c = cfg["countries"]["local_currency"] + cfg["countries"]["hard_currency"]
             excluded = cfg.get("excluded_series", {})
@@ -1484,7 +1484,7 @@ elif page == "Portfolios":
             return out
 
         try:
-            yield_levels = _load_yield_levels()
+            yield_levels = _load_yield_levels(_RAW_VER)
         except Exception as _ye:
             st.warning(f"Could not load yield levels: {_ye}")
             yield_levels = {}
@@ -1677,8 +1677,8 @@ elif page == "Portfolios":
                 current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
             )
 
-        @st.cache_data(show_spinner="Loading risk-free rates…")
-        def _load_rf_data():
+        @st.cache_data(show_spinner="Loading risk-free rates…", persist="disk")
+        def _load_rf_data(version):
             cfg = load_config()
             key_path = cfg.get("fred", {}).get("key_path", "private/fred_key.txt")
             out_path  = cfg.get("fred", {}).get("output_path", "data/output/risk_free_rates.csv")
@@ -1688,7 +1688,7 @@ elif page == "Portfolios":
             except Exception:
                 return None
 
-        rf_data = _load_rf_data()
+        rf_data = _load_rf_data(_OUT_VER)
         rs1 = _risk_stats(p1["def"], p1["pnl"], yield_levels, rf_data)
         rs2 = _risk_stats(p2["def"], p2["pnl"], yield_levels, rf_data)
         pn1, pn2 = p1["def"]["name"], p2["def"]["name"]
