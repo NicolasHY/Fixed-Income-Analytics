@@ -17,6 +17,10 @@ def data_version(path: str | Path) -> tuple[tuple[str, float], ...]:
     files only — never reads them — so it is cheap to call on every
     Streamlit rerun. Returns an empty tuple for a missing directory so a
     not-yet-generated data folder is still a stable, valid cache key.
+    An existing-but-empty directory also returns ``()``; the collision is
+    intentional and safe because dashboard loaders return ``None`` when
+    their files are absent, making "missing dir" and "empty dir" the same
+    "no data" state.
     Files that vanish mid-walk are skipped rather than raising.
     """
     root = Path(path)

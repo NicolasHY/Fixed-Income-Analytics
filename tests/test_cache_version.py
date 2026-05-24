@@ -45,3 +45,13 @@ def test_recurses_into_subdirectories(tmp_path):
     before = data_version(tmp_path)
     os.utime(bond, (1_000_000_000, 1_000_000_000))
     assert data_version(tmp_path) != before
+
+def test_accepts_string_path(tmp_path):
+    (tmp_path / "a.csv").write_text("x")
+    assert data_version(str(tmp_path)) == data_version(tmp_path)
+
+
+def test_existing_empty_directory_returns_empty(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert data_version(empty) == ()
