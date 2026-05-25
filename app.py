@@ -1663,18 +1663,23 @@ elif page == "Portfolios":
         # ── 2. Risk & Ratio Metrics ────────────────────────────────────────
         estr_now = rs1["current_estr"]
         sofr_now = rs1["current_sofr"]
+        ust_now  = rs1["current_ust"]
         avg_e    = rs1["avg_estr"]
-        has_rf   = not np.isnan(estr_now)
-        rf_label = f"€STR ({estr_now:.2f}%)" if has_rf else "0 (no rf data)"
+        avg_u    = rs1["avg_ust"]
+        rf_lbl   = rs1.get("rf_label", "0")
+        has_rf   = not np.isnan(ust_now)
+        rf_label = f"{rf_lbl} ({ust_now:.2f}%)" if has_rf else "0 (no rf data)"
 
         # Rate context banner
         if has_rf:
+            estr_str = f"€STR = <strong>{estr_now:.3f}%</strong>&nbsp;|&nbsp;" if not np.isnan(estr_now) else ""
+            sofr_str = f"SOFR = <strong>{sofr_now:.3f}%</strong>&nbsp;|&nbsp;" if not np.isnan(sofr_now) else ""
             st.markdown(f"""
             <div class='info-banner'>
                 <strong>Risk-free rates (FRED, latest):</strong>
-                &nbsp; €STR = <strong>{estr_now:.3f}%</strong>
-                &nbsp;|&nbsp; SOFR = <strong>{sofr_now:.3f}%</strong>
-                &nbsp;|&nbsp; Average €STR over portfolio history = <strong>{avg_e:.3f}%</strong>
+                &nbsp; {rf_lbl} = <strong>{ust_now:.3f}%</strong>
+                &nbsp;|&nbsp; {estr_str}{sofr_str}
+                Avg {rf_lbl} over portfolio history = <strong>{avg_u:.3f}%</strong>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1690,7 +1695,7 @@ elif page == "Portfolios":
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_risk_tbl, use_container_width=True, hide_index=True)
         _csv_download(df_risk_tbl, "portfolio_risk_metrics.csv", key="dl_pf_risk")
-        st.caption("Sharpe and Sortino use daily excess returns over €STR (EUR risk-free, source: FRED). Sortino denominator = annualised downside semi-deviation of excess returns:")
+        st.caption(f"Sharpe and Sortino use daily excess returns over the UST constant-maturity yield matching each portfolio's benchmark maturity (source: FRED). Falls back to SOFR if the UST series is unavailable. Sortino denominator = annualised downside semi-deviation of excess returns:")
         st.latex(r"\text{Sortino denominator} \;=\; \sqrt{\mathbb{E}\!\left[\min(\text{excess},\, 0)^2\right]} \cdot \sqrt{252}")
         st.latex(r"\text{Calmar} \;=\; \frac{\text{Annualised total return}}{\lvert \text{Max drawdown} \rvert}")
         st.caption("rf = 0 rows shown for reference.")

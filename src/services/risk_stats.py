@@ -145,18 +145,24 @@ def compute_risk_stats(
     )
     calmar = (ann_ret / 100) / abs(max_dd / 100) if max_dd != 0 else np.nan
 
-    # ── Ratios rf = €STR ──────────────────────────────────────────────────────
+    # ── Ratios rf = UST (benchmark maturity) ─────────────────────────────────
     current_estr = np.nan
     current_sofr = np.nan
+    current_ust  = np.nan
     avg_estr = np.nan
-    sharpe = sharpe_zero
+    avg_ust  = np.nan
+    rf_label = "0"
+    sharpe  = sharpe_zero
     sortino = sortino_zero
     if rf_data is not None:
+        from src.risk_free import align_rf_to_pnl, ust_column
+        ust_col = ust_column(mat)
+        rf_col = ust_col if ust_col in rf_data.columns else "sofr_pct"
+        rf_label = f"UST {mat}" if rf_col == ust_col else "SOFR"
         try:
-            from src.risk_free import align_rf_to_pnl
-            rf_estr = align_rf_to_pnl(rf_data, pnl, column="estr_pct")
-            common = pnl.index.intersection(rf_estr.index)
-            excess = pnl.loc[common] - rf_estr.loc[common]
+            rf_series = align_rf_to_pnl(rf_data, pnl, column=rf_col)
+            common = pnl.index.intersection(rf_series.index)
+            excess = pnl.loc[common] - rf_series.loc[common]
             n_exc = len(excess)
             ann_exc = float(((1 + excess).prod() ** (252 / n_exc) - 1) * 100)
             exc_vol = float(excess.std() * np.sqrt(252) * 100)
@@ -165,11 +171,16 @@ def compute_risk_stats(
             sortino = (
                 (ann_exc / 100) / (np.sqrt(ds_rf) * np.sqrt(252)) if ds_rf > 0 else np.nan
             )
+            avg_ust = float(rf_data[rf_col].reindex(pnl.index, method="ffill").dropna().mean())
+            current_ust = float(rf_data[rf_col].dropna().iloc[-1])
+        except Exception:
+            pass
+        try:
+            current_estr = float(rf_data["estr_pct"].dropna().iloc[-1])
+            current_sofr = float(rf_data["sofr_pct"].dropna().iloc[-1])
             avg_estr = float(
                 rf_data["estr_pct"].reindex(pnl.index, method="ffill").dropna().mean()
             )
-            current_estr = float(rf_data["estr_pct"].dropna().iloc[-1])
-            current_sofr = float(rf_data["sofr_pct"].dropna().iloc[-1])
         except Exception:
             pass
 
@@ -218,4 +229,5 @@ def compute_risk_stats(
         ytm=ytm, yc_slope=yc_slope, krd=krd, c_vals=c_vals,
         var_rows=var_rows, var_rows_eur=var_rows_eur,
         current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
+        current_ust=current_ust, avg_ust=avg_ust, rf_label=rf_label,
     )
