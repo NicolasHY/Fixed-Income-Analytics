@@ -31,6 +31,8 @@ from src.data.var_artifacts import (
 )
 from src.risk_free import load_risk_free_rates, align_rf_to_pnl
 from src.services.portfolios import build_portfolio_views, compute_quick_stats
+from src.services.risk_stats import compute_risk_stats
+from src.report_generator import get_available_quarters, generate_quarterly_report
 from src.ui_theme import apply_theme
 import chatbot
 
@@ -674,6 +676,46 @@ def _load_briefings(version):
     return _load_briefings_from_disk(OUT / "sample_briefings.json")
 
 
+@st.cache_data(show_spinner="Loading yield levels…", persist="disk")
+def _load_yield_levels(version):
+    cfg = load_config()
+    all_c = cfg["countries"]["local_currency"] + cfg["countries"]["hard_currency"]
+    excluded = cfg.get("excluded_series", {})
+    out = {}
+    for country in all_c:
+        try:
+            df = load_country_yields(country, "data/raw")
+            excl = excluded.get(country, [])
+            df = df.drop(columns=[c for c in excl if c in df.columns])
+            out[country] = df
+        except Exception:
+            pass
+    return out
+
+
+# Keyed on _OUT_VER because the rf rates live in data/output.
+@st.cache_data(show_spinner="Loading risk-free rates…", persist="disk")
+def _load_rf_data(version):
+    cfg = load_config()
+    key_path = cfg.get("fred", {}).get("key_path", "private/fred_key.txt")
+    out_path  = cfg.get("fred", {}).get("output_path", "data/output/risk_free_rates.csv")
+    try:
+        key = open(key_path).read().strip()
+        return load_risk_free_rates(out_path, fred_api_key=key)
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner="Preparing quarterly report…")
+def _cached_report(q_start_iso: str, q_end_iso: str, _ver: str) -> bytes:
+    from datetime import date as _date
+    return generate_quarterly_report({
+        "label": f"{q_start_iso} – {q_end_iso}",
+        "start": _date.fromisoformat(q_start_iso),
+        "end":   _date.fromisoformat(q_end_iso),
+    })
+
+
 # ── Shared UI helpers ───────────────────────────────────────────────────────────
 def _csv_download(df, filename, *, key, label="⬇ Download CSV", index=False):
     """Render a compact CSV export button for a displayed table.
@@ -1309,6 +1351,48 @@ elif page == "Portfolios":
     p1 = portfolio_results[0]
     p2 = portfolio_results[1]
 
+    # Pre-compute risk stats and yield levels once (used by both tab_risk and export button).
+    yield_levels = _load_yield_levels(_RAW_VER)
+    rf_data      = _load_rf_data(_OUT_VER)
+    rs1 = compute_risk_stats(p1["def"], p1["pnl"], yield_levels, rf_data)
+    rs2 = compute_risk_stats(p2["def"], p2["pnl"], yield_levels, rf_data)
+
+    # ── Quarterly export control bar ──────────────────────────────────────────
+    quarters = get_available_quarters(p1["pnl"])
+    if quarters:
+        st.markdown(
+            "<div class='section-card' style='padding:16px 24px; margin-bottom:16px;'>"
+            "<h3 style='margin-bottom:12px;'>Quarterly Report Export</h3>",
+            unsafe_allow_html=True,
+        )
+        _exp_col1, _exp_col2 = st.columns([3, 1])
+        with _exp_col1:
+            _q_idx = st.selectbox(
+                "Select quarter",
+                range(len(quarters)),
+                format_func=lambda i: quarters[i]["label"],
+                label_visibility="visible",
+            )
+        with _exp_col2:
+            _q = quarters[_q_idx]
+            _q_num = (_q["start"].month - 1) // 3 + 1
+            _fname = f"EM_FI_Q{_q_num}_{_q['start'].year}_Report.xlsx"
+            _report_bytes = _cached_report(
+                _q["start"].isoformat(),
+                _q["end"].isoformat(),
+                _RAW_VER,
+            )
+            st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
+            st.download_button(
+                label="Export Quarterly Report",
+                data=_report_bytes,
+                file_name=_fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                help=f"Download {_q['label']} as a pre-filled Excel report.",
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
     tab_weights, tab_perf, tab_var, tab_compare, tab_risk = st.tabs(
         ["Weights", "Cumulative Performance", "VaR", "P&L Comparison", "Risk Statistics"]
     )
@@ -1551,235 +1635,11 @@ elif page == "Portfolios":
     # ── Risk Statistics ───────────────────────────────────────────────────────
     with tab_risk:
 
-        @st.cache_data(show_spinner="Loading yield levels…", persist="disk")
-        def _load_yield_levels(version):
-            cfg = load_config()
-            all_c = cfg["countries"]["local_currency"] + cfg["countries"]["hard_currency"]
-            excluded = cfg.get("excluded_series", {})
-            out = {}
-            for country in all_c:
-                try:
-                    df = load_country_yields(country, "data/raw")
-                    excl = excluded.get(country, [])
-                    df = df.drop(columns=[c for c in excl if c in df.columns])
-                    out[country] = df
-                except Exception:
-                    pass
-            return out
-
-        try:
-            yield_levels = _load_yield_levels(_RAW_VER)
-        except Exception as _ye:
-            st.warning(f"Could not load yield levels: {_ye}")
-            yield_levels = {}
-
         def _fmt(val, fmt=".2f"):
             if val is None or (isinstance(val, float) and np.isnan(val)):
                 return "N/A"
             return f"{val:{fmt}}"
 
-        def _risk_stats(pdef, pnl, lvls, rf_data=None):
-            raw_w = pdef["weights"]
-            tot_w = sum(raw_w.values())
-            w = {k: v / tot_w for k, v in raw_w.items()}
-            D = float(pdef["effective_duration"])
-            mat = pdef["benchmark_maturity"]
-            mat_n = int(mat[:-1])
-            n = len(pnl)
-
-            # ── Return metrics ──────────────────────────────────────────────
-            cum_log = float(np.log1p(pnl).sum() * 100)
-            ann_ret = float(((1 + pnl).prod() ** (252 / n) - 1) * 100)
-
-            # Carry: portfolio-weighted latest benchmark yield
-            c_vals = {}
-            for c in w:
-                if c in lvls and mat in lvls[c].columns:
-                    s = lvls[c][mat].dropna()
-                    if len(s) > 0:
-                        c_vals[c] = float(s.iloc[-1])
-            if c_vals:
-                ws = sum(w[c] for c in c_vals)
-                carry = sum(w[c] * c_vals[c] for c in c_vals) / ws
-            else:
-                carry = np.nan
-
-            # Per-country modified duration — par bond approximation
-            # MD_i = [1 − (1 + y_i)^(−T)] / y_i  (par-priced bond, annual compounding)
-            def _par_md(yield_pct, T):
-                y = yield_pct / 100
-                return float(T) if y <= 0 else (1 - (1 + y) ** (-T)) / y
-
-            md_by_c = {c: _par_md(c_vals[c], mat_n) for c in c_vals}
-            for c in w:               # fallback to config D_eff if no yield data
-                if c not in md_by_c:
-                    md_by_c[c] = D
-
-            # Roll-down: per-country MD × slope_per_year toward next shorter maturity
-            rd_vals = {}
-            for c in w:
-                if c not in lvls:
-                    continue
-                avail_nums = sorted([int(x[:-1]) for x in lvls[c].columns])
-                shorter = [m for m in avail_nums if m < mat_n]
-                if not shorter:
-                    continue
-                ns = max(shorter)
-                ns_str = f"{ns}Y"
-                sub = lvls[c][[mat, ns_str]].dropna()
-                if len(sub) == 0:
-                    continue
-                row = sub.iloc[-1]
-                slope = (row[mat] - row[ns_str]) / (mat_n - ns)
-                rd_vals[c] = md_by_c[c] * slope
-            if rd_vals:
-                ws_rd = sum(w[c] for c in rd_vals)
-                rolldown = sum(w[c] * rd_vals[c] for c in rd_vals) / ws_rd
-            else:
-                rolldown = np.nan
-
-            # ── Risk metrics ────────────────────────────────────────────────
-            ann_vol = float(pnl.std() * np.sqrt(252) * 100)
-            cum_s = (1 + pnl).cumprod()
-            max_dd = float(((cum_s / cum_s.cummax()) - 1).min() * 100)
-
-            # Duration & bond analytics (portfolio-weighted from per-country par bond MD)
-            aum = float(pdef.get("aum_eur", 0))
-
-            ws_md  = sum(w[c] for c in md_by_c)
-            mod_dur = sum(w[c] * md_by_c[c] for c in md_by_c) / ws_md
-
-            dv01     = mod_dur * 0.01                          # % of NAV per 1bp shift
-            dv01_eur = mod_dur * 0.0001 * aum if aum else np.nan  # EUR per 1bp shift
-
-            ytm = carry  # latest portfolio-weighted benchmark yield as YTM proxy
-
-            # Per-country convexity: C_i = D_mac_i × (D_mac_i + 1) / (1 + y_i)²
-            conv_by_c = {}
-            for c in md_by_c:
-                if c in c_vals:
-                    y_f_c   = c_vals[c] / 100
-                    d_mac_c = md_by_c[c] * (1 + y_f_c)
-                    conv_by_c[c] = d_mac_c * (d_mac_c + 1) / (1 + y_f_c) ** 2
-            if conv_by_c:
-                ws_cv     = sum(w[c] for c in conv_by_c)
-                convexity = sum(w[c] * conv_by_c[c] for c in conv_by_c) / ws_cv
-            else:
-                convexity = np.nan
-
-            # Yield curve slope: (max_maturity − min_maturity) yield, portfolio-weighted
-            sl_vals = {}
-            for c in w:
-                if c not in lvls:
-                    continue
-                lr = lvls[c].dropna(how="all").iloc[-1].dropna()
-                avail = sorted(lr.index, key=lambda x: int(x[:-1]))
-                if len(avail) >= 2:
-                    sl_vals[c] = float(lr[avail[-1]] - lr[avail[0]])
-            if sl_vals:
-                ws_sl = sum(w[c] for c in sl_vals)
-                yc_slope = sum(w[c] * sl_vals[c] for c in sl_vals) / ws_sl
-            else:
-                yc_slope = np.nan
-
-            # Key-rate duration by country: w_i × MD_i (per-country par bond duration)
-            krd = {c: w[c] * md_by_c.get(c, D) for c in w}
-
-            # ── Ratios (rf = 0 baseline) ─────────────────────────────────────
-            sharpe_zero = (ann_ret / 100) / (ann_vol / 100) if ann_vol > 0 else np.nan
-            ds_zero = float(np.mean(np.minimum(pnl, 0.0) ** 2))
-            sortino_zero = (ann_ret / 100) / (np.sqrt(ds_zero) * np.sqrt(252)) if ds_zero > 0 else np.nan
-            calmar = (ann_ret / 100) / abs(max_dd / 100) if max_dd != 0 else np.nan
-
-            # ── Ratios (rf = €STR) ───────────────────────────────────────────
-            current_estr = np.nan
-            current_sofr = np.nan
-            sharpe = sharpe_zero
-            sortino = sortino_zero
-            avg_estr = np.nan
-            if rf_data is not None:
-                try:
-                    rf_estr = align_rf_to_pnl(rf_data, pnl, column="estr_pct")
-                    common = pnl.index.intersection(rf_estr.index)
-                    excess = pnl.loc[common] - rf_estr.loc[common]
-                    n_exc = len(excess)
-                    ann_exc = float(((1 + excess).prod() ** (252 / n_exc) - 1) * 100)
-                    exc_vol = float(excess.std() * np.sqrt(252) * 100)
-                    sharpe = (ann_exc / 100) / (exc_vol / 100) if exc_vol > 0 else np.nan
-                    ds_rf = float(np.mean(np.minimum(excess, 0.0) ** 2))
-                    sortino = (ann_exc / 100) / (np.sqrt(ds_rf) * np.sqrt(252)) if ds_rf > 0 else np.nan
-                    avg_estr = float(rf_data["estr_pct"].reindex(pnl.index, method="ffill").dropna().mean())
-                    current_estr = float(rf_data["estr_pct"].dropna().iloc[-1])
-                    current_sofr = float(rf_data["sofr_pct"].dropna().iloc[-1])
-                except Exception:
-                    pass
-
-            # ── VaR / CVaR ──────────────────────────────────────────────────
-            mu_p, sig_p = pnl.mean(), pnl.std()
-            np.random.seed(42)
-            sims = np.random.normal(mu_p, sig_p, 50_000)
-            var_rows = []
-            for alpha in [0.05, 0.10]:
-                z = norm.ppf(alpha)
-                pv  = -(mu_p + z * sig_p) * 100
-                pcv = -(mu_p - sig_p * norm.pdf(-z) / alpha) * 100
-                q   = float(np.quantile(pnl, alpha))
-                hv  = -q * 100
-                tmask = pnl <= q
-                hcv = -float(pnl[tmask].mean()) * 100 if tmask.any() else np.nan
-                mcv = -float(np.percentile(sims, alpha * 100)) * 100
-                var_rows.append({
-                    "α": f"{int(alpha * 100)}%",
-                    "Confidence": f"{int((1 - alpha) * 100)}%",
-                    "Param VaR (%)": round(pv, 4),
-                    "Param CVaR (%)": round(pcv, 4),
-                    "Hist VaR (%)": round(hv, 4),
-                    "Hist CVaR (%)": round(hcv, 4),
-                    "MC VaR (%)": round(mcv, 4),
-                })
-
-            # Dollar VaR rows (reuse var_rows, scale by AUM)
-            var_rows_eur = []
-            for vr in var_rows:
-                var_rows_eur.append({
-                    **vr,
-                    "Param VaR (EUR)":  vr["Param VaR (%)"]  / 100 * aum if aum else np.nan,
-                    "Hist VaR (EUR)":   vr["Hist VaR (%)"]   / 100 * aum if aum else np.nan,
-                    "MC VaR (EUR)":     vr["MC VaR (%)"]     / 100 * aum if aum else np.nan,
-                    "Param CVaR (EUR)": vr["Param CVaR (%)"] / 100 * aum if aum else np.nan,
-                })
-
-            return dict(
-                cum_log=cum_log, ann_ret=ann_ret, carry=carry, rolldown=rolldown,
-                ann_vol=ann_vol, max_dd=max_dd,
-                sharpe=sharpe, sortino=sortino,
-                sharpe_zero=sharpe_zero, sortino_zero=sortino_zero,
-                calmar=calmar, mod_dur=mod_dur, dv01=dv01, dv01_eur=dv01_eur,
-                aum=aum, convexity=convexity, md_by_c=md_by_c,
-                ytm=ytm, yc_slope=yc_slope, krd=krd,
-                var_rows=var_rows, var_rows_eur=var_rows_eur,
-                current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
-            )
-
-        # Keyed on _OUT_VER because the rf rates live in data/output. If the
-        # CSV is missing, load_risk_free_rates fetches from FRED and writes it
-        # there — bumping _OUT_VER on the next rerun and busting the output
-        # caches once. This is first-run-only and never serves stale data; the
-        # repo ships risk_free_rates.csv, so the FRED branch is normally dead.
-        @st.cache_data(show_spinner="Loading risk-free rates…", persist="disk")
-        def _load_rf_data(version):
-            cfg = load_config()
-            key_path = cfg.get("fred", {}).get("key_path", "private/fred_key.txt")
-            out_path  = cfg.get("fred", {}).get("output_path", "data/output/risk_free_rates.csv")
-            try:
-                key = open(key_path).read().strip()
-                return load_risk_free_rates(out_path, fred_api_key=key)
-            except Exception:
-                return None
-
-        rf_data = _load_rf_data(_OUT_VER)
-        rs1 = _risk_stats(p1["def"], p1["pnl"], yield_levels, rf_data)
-        rs2 = _risk_stats(p2["def"], p2["pnl"], yield_levels, rf_data)
         pn1, pn2 = p1["def"]["name"], p2["def"]["name"]
 
         FLAG_R = {"Brazil": "🇧🇷", "Mexico": "🇲🇽", "South Africa": "🇿🇦", "Poland": "🇵🇱",
@@ -1803,18 +1663,23 @@ elif page == "Portfolios":
         # ── 2. Risk & Ratio Metrics ────────────────────────────────────────
         estr_now = rs1["current_estr"]
         sofr_now = rs1["current_sofr"]
+        ust_now  = rs1["current_ust"]
         avg_e    = rs1["avg_estr"]
-        has_rf   = not np.isnan(estr_now)
-        rf_label = f"€STR ({estr_now:.2f}%)" if has_rf else "0 (no rf data)"
+        avg_u    = rs1["avg_ust"]
+        rf_lbl   = rs1.get("rf_label", "0")
+        has_rf   = not np.isnan(ust_now)
+        rf_label = f"{rf_lbl} ({ust_now:.2f}%)" if has_rf else "0 (no rf data)"
 
         # Rate context banner
         if has_rf:
+            estr_str = f"€STR = <strong>{estr_now:.3f}%</strong>&nbsp;|&nbsp;" if not np.isnan(estr_now) else ""
+            sofr_str = f"SOFR = <strong>{sofr_now:.3f}%</strong>&nbsp;|&nbsp;" if not np.isnan(sofr_now) else ""
             st.markdown(f"""
             <div class='info-banner'>
                 <strong>Risk-free rates (FRED, latest):</strong>
-                &nbsp; €STR = <strong>{estr_now:.3f}%</strong>
-                &nbsp;|&nbsp; SOFR = <strong>{sofr_now:.3f}%</strong>
-                &nbsp;|&nbsp; Average €STR over portfolio history = <strong>{avg_e:.3f}%</strong>
+                &nbsp; {rf_lbl} = <strong>{ust_now:.3f}%</strong>
+                &nbsp;|&nbsp; {estr_str}{sofr_str}
+                Avg {rf_lbl} over portfolio history = <strong>{avg_u:.3f}%</strong>
             </div>
             """, unsafe_allow_html=True)
 
@@ -1830,7 +1695,7 @@ elif page == "Portfolios":
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_risk_tbl, use_container_width=True, hide_index=True)
         _csv_download(df_risk_tbl, "portfolio_risk_metrics.csv", key="dl_pf_risk")
-        st.caption("Sharpe and Sortino use daily excess returns over €STR (EUR risk-free, source: FRED). Sortino denominator = annualised downside semi-deviation of excess returns:")
+        st.caption(f"Sharpe and Sortino use daily excess returns over the UST constant-maturity yield matching each portfolio's benchmark maturity (source: FRED). Falls back to SOFR if the UST series is unavailable. Sortino denominator = annualised downside semi-deviation of excess returns:")
         st.latex(r"\text{Sortino denominator} \;=\; \sqrt{\mathbb{E}\!\left[\min(\text{excess},\, 0)^2\right]} \cdot \sqrt{252}")
         st.latex(r"\text{Calmar} \;=\; \frac{\text{Annualised total return}}{\lvert \text{Max drawdown} \rvert}")
         st.caption("rf = 0 rows shown for reference.")

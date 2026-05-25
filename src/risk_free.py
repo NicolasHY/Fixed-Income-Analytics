@@ -23,11 +23,28 @@ logger = logging.getLogger(__name__)
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
-# FRED series IDs
+# FRED series IDs — overnight rates
 _SOFR   = "SOFR"                    # Secured Overnight Financing Rate (USD)
 _DFF    = "DFF"                     # Effective Federal Funds Rate – backfill for SOFR
 _ESTR   = "ECBESTRVOLWGTTRMDMNRT"   # Euro Short-Term Rate (€STR)
 _EONIA  = "EONYA"                   # EONIA overnight rate – backfill for €STR
+
+# US Treasury constant-maturity yields (DGS* series) — one per standard tenor
+_UST_SERIES: dict[str, str] = {
+    "1Y":  "DGS1",
+    "2Y":  "DGS2",
+    "3Y":  "DGS3",
+    "5Y":  "DGS5",
+    "7Y":  "DGS7",
+    "10Y": "DGS10",
+    "20Y": "DGS20",
+    "30Y": "DGS30",
+}
+
+
+def ust_column(maturity: str) -> str:
+    """Return the CSV column name for a given tenor, e.g. '5Y' → 'ust_5Y_pct'."""
+    return f"ust_{maturity}_pct"
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +124,19 @@ def fetch_and_cache_risk_free_rates(
     eur_rf = estr.combine_first(eonia)
     eur_rf.name = "estr_pct"
 
+    # ── UST constant-maturity yields ────────────────────────────────────────
+    ust_series: list[pd.Series] = []
+    for tenor, series_id in _UST_SERIES.items():
+        try:
+            s = _fetch_series(fred_api_key, series_id, start=start)
+            s.name = ust_column(tenor)
+            ust_series.append(s)
+        except Exception as exc:
+            logger.warning("Could not fetch UST %s (%s).", tenor, exc)
+
     # ── Combine, forward-fill, save ──────────────────────────────────────────
-    out = pd.concat([usd_rf, eur_rf], axis=1).sort_index()
+    frames = [usd_rf, eur_rf] + ust_series
+    out = pd.concat(frames, axis=1).sort_index()
     out = out.ffill()          # propagate weekend / holiday values
 
     output_path = Path(output_path)
@@ -135,16 +163,21 @@ def load_risk_free_rates(
         Columns: ``sofr_pct``, ``estr_pct`` (annualised %).
     """
     output_path = Path(output_path)
-    if not output_path.exists():
-        if fred_api_key:
-            return fetch_and_cache_risk_free_rates(fred_api_key, output_path)
-        raise FileNotFoundError(
-            f"{output_path} not found. Provide a FRED API key or run "
-            "fetch_and_cache_risk_free_rates() first."
-        )
-    df = pd.read_csv(output_path, index_col=0, parse_dates=True)
-    logger.info("Loaded risk-free rates from %s (%d rows).", output_path, len(df))
-    return df
+    if output_path.exists():
+        df = pd.read_csv(output_path, index_col=0, parse_dates=True)
+        # Re-fetch if UST columns are absent (cache pre-dates UST addition)
+        has_ust = any(c.startswith("ust_") for c in df.columns)
+        if has_ust:
+            logger.info("Loaded risk-free rates from %s (%d rows).", output_path, len(df))
+            return df
+        logger.info("Cached rf file lacks UST columns — re-fetching from FRED.")
+
+    if fred_api_key:
+        return fetch_and_cache_risk_free_rates(fred_api_key, output_path)
+    raise FileNotFoundError(
+        f"{output_path} not found or missing UST columns. Provide a FRED API key or run "
+        "fetch_and_cache_risk_free_rates() first."
+    )
 
 
 def daily_rf_from_annual(annual_pct: pd.Series) -> pd.Series:
