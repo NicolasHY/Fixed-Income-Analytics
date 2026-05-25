@@ -37,7 +37,7 @@ def compute_risk_stats(
         mod_dur, dv01, dv01_eur, convexity, ytm, yc_slope,
         krd, md_by_c, c_vals,
         var_rows, var_rows_eur,
-        current_estr, current_sofr, avg_estr, aum.
+        current_estr, current_sofr, avg_sofr, aum.
     """
     def _par_md(yield_pct: float, T: int) -> float:
         y = yield_pct / 100
@@ -145,42 +145,43 @@ def compute_risk_stats(
     )
     calmar = (ann_ret / 100) / abs(max_dd / 100) if max_dd != 0 else np.nan
 
-    # ── Ratios rf = UST (benchmark maturity) ─────────────────────────────────
+    # ── Ratios rf = SOFR overnight (fall back to €STR) ───────────────────────
     current_estr = np.nan
     current_sofr = np.nan
-    current_ust  = np.nan
-    avg_estr = np.nan
-    avg_ust  = np.nan
+    avg_sofr     = np.nan
     rf_label = "0"
     sharpe  = sharpe_zero
     sortino = sortino_zero
     if rf_data is not None:
-        from src.risk_free import align_rf_to_pnl, ust_column
-        ust_col = ust_column(mat)
-        rf_col = ust_col if ust_col in rf_data.columns else "sofr_pct"
-        rf_label = f"UST {mat}" if rf_col == ust_col else "SOFR"
+        from src.risk_free import align_rf_to_pnl
+        # Overnight rate: SOFR preferred, €STR as fallback
+        if "sofr_pct" in rf_data.columns and rf_data["sofr_pct"].dropna().shape[0] > 0:
+            rf_col, rf_label = "sofr_pct", "SOFR"
+        elif "estr_pct" in rf_data.columns and rf_data["estr_pct"].dropna().shape[0] > 0:
+            rf_col, rf_label = "estr_pct", "€STR"
+        else:
+            rf_col = None
+        if rf_col:
+            try:
+                rf_series = align_rf_to_pnl(rf_data, pnl, column=rf_col)
+                common = pnl.index.intersection(rf_series.index)
+                excess = pnl.loc[common] - rf_series.loc[common]
+                n_exc = len(excess)
+                ann_exc = float(((1 + excess).prod() ** (252 / n_exc) - 1) * 100)
+                exc_vol = float(excess.std() * np.sqrt(252) * 100)
+                sharpe = (ann_exc / 100) / (exc_vol / 100) if exc_vol > 0 else np.nan
+                ds_rf = float(np.mean(np.minimum(excess, 0.0) ** 2))
+                sortino = (
+                    (ann_exc / 100) / (np.sqrt(ds_rf) * np.sqrt(252)) if ds_rf > 0 else np.nan
+                )
+                avg_sofr = float(
+                    rf_data[rf_col].reindex(pnl.index, method="ffill").dropna().mean()
+                )
+            except Exception:
+                pass
         try:
-            rf_series = align_rf_to_pnl(rf_data, pnl, column=rf_col)
-            common = pnl.index.intersection(rf_series.index)
-            excess = pnl.loc[common] - rf_series.loc[common]
-            n_exc = len(excess)
-            ann_exc = float(((1 + excess).prod() ** (252 / n_exc) - 1) * 100)
-            exc_vol = float(excess.std() * np.sqrt(252) * 100)
-            sharpe = (ann_exc / 100) / (exc_vol / 100) if exc_vol > 0 else np.nan
-            ds_rf = float(np.mean(np.minimum(excess, 0.0) ** 2))
-            sortino = (
-                (ann_exc / 100) / (np.sqrt(ds_rf) * np.sqrt(252)) if ds_rf > 0 else np.nan
-            )
-            avg_ust = float(rf_data[rf_col].reindex(pnl.index, method="ffill").dropna().mean())
-            current_ust = float(rf_data[rf_col].dropna().iloc[-1])
-        except Exception:
-            pass
-        try:
-            current_estr = float(rf_data["estr_pct"].dropna().iloc[-1])
             current_sofr = float(rf_data["sofr_pct"].dropna().iloc[-1])
-            avg_estr = float(
-                rf_data["estr_pct"].reindex(pnl.index, method="ffill").dropna().mean()
-            )
+            current_estr = float(rf_data["estr_pct"].dropna().iloc[-1])
         except Exception:
             pass
 
@@ -228,6 +229,6 @@ def compute_risk_stats(
         aum=aum, convexity=convexity, md_by_c=md_by_c,
         ytm=ytm, yc_slope=yc_slope, krd=krd, c_vals=c_vals,
         var_rows=var_rows, var_rows_eur=var_rows_eur,
-        current_estr=current_estr, current_sofr=current_sofr, avg_estr=avg_estr,
-        current_ust=current_ust, avg_ust=avg_ust, rf_label=rf_label,
+        current_estr=current_estr, current_sofr=current_sofr,
+        avg_sofr=avg_sofr, rf_label=rf_label,
     )

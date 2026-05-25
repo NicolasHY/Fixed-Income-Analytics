@@ -459,6 +459,17 @@ def generate_quarterly_report(quarter: dict) -> bytes:
     ws_perf["D5"] = datetime.combine(quarter["start"], datetime.min.time())
     ws_perf["D6"] = datetime.combine(quarter["end"],   datetime.min.time())
 
+    # D8 = Rf_Rate (annualised decimal) — quarter-average SOFR, falling back to €STR
+    if rf_data is not None:
+        q_start_ts = pd.Timestamp(quarter["start"])
+        q_end_ts   = pd.Timestamp(quarter["end"])
+        for col in ("sofr_pct", "estr_pct"):
+            if col in rf_data.columns:
+                q_rf = rf_data[col].loc[q_start_ts:q_end_ts].dropna()
+                if len(q_rf) > 0:
+                    ws_perf["D8"] = float(q_rf.mean()) / 100
+                    break
+
     lbl = quarter["label"]
     _write_risk_summary(wb, rs1, rs2, pn1, pn2, lbl)
     _write_var_analysis(wb, rs1, rs2, pn1, pn2, lbl)

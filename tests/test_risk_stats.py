@@ -45,7 +45,7 @@ def test_returns_required_keys(pdef, pnl, yield_levels):
         "ann_ret", "ann_vol", "max_dd", "sharpe_zero", "sortino_zero", "calmar",
         "mod_dur", "dv01", "dv01_eur", "krd", "var_rows", "var_rows_eur",
         "c_vals", "carry", "rolldown", "convexity", "ytm", "yc_slope",
-        "current_estr", "current_sofr", "avg_estr",
+        "current_estr", "current_sofr", "avg_sofr",
     ]:
         assert key in result, f"Missing key: {key}"
 

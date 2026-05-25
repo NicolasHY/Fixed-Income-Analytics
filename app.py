@@ -109,6 +109,7 @@ st.markdown("""
     section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
         display: flex !important;
         align-items: center;
+        width: 100% !important;
         padding: 7px 12px;
         margin: 0;
         border-radius: 6px;
@@ -1661,25 +1662,22 @@ elif page == "Portfolios":
         st.markdown("</div>", unsafe_allow_html=True)
 
         # ── 2. Risk & Ratio Metrics ────────────────────────────────────────
-        estr_now = rs1["current_estr"]
         sofr_now = rs1["current_sofr"]
-        ust_now  = rs1["current_ust"]
-        avg_e    = rs1["avg_estr"]
-        avg_u    = rs1["avg_ust"]
+        estr_now = rs1["current_estr"]
+        avg_sofr = rs1["avg_sofr"]
         rf_lbl   = rs1.get("rf_label", "0")
-        has_rf   = not np.isnan(ust_now)
-        rf_label = f"{rf_lbl} ({ust_now:.2f}%)" if has_rf else "0 (no rf data)"
+        has_rf   = not np.isnan(sofr_now)
+        rf_label = f"{rf_lbl} ({sofr_now:.2f}%)" if has_rf else "0 (no rf data)"
 
         # Rate context banner
         if has_rf:
-            estr_str = f"€STR = <strong>{estr_now:.3f}%</strong>&nbsp;|&nbsp;" if not np.isnan(estr_now) else ""
-            sofr_str = f"SOFR = <strong>{sofr_now:.3f}%</strong>&nbsp;|&nbsp;" if not np.isnan(sofr_now) else ""
+            estr_str = f"&nbsp;|&nbsp; €STR = <strong>{estr_now:.3f}%</strong>" if not np.isnan(estr_now) else ""
+            avg_str  = f"<strong>{avg_sofr:.3f}%</strong>" if not np.isnan(avg_sofr) else "N/A"
             st.markdown(f"""
             <div class='info-banner'>
-                <strong>Risk-free rates (FRED, latest):</strong>
-                &nbsp; {rf_lbl} = <strong>{ust_now:.3f}%</strong>
-                &nbsp;|&nbsp; {estr_str}{sofr_str}
-                Avg {rf_lbl} over portfolio history = <strong>{avg_u:.3f}%</strong>
+                <strong>Risk-free rate (FRED, latest):</strong>
+                &nbsp; SOFR = <strong>{sofr_now:.3f}%</strong>{estr_str}
+                &nbsp;|&nbsp; Avg SOFR over portfolio history = {avg_str}
             </div>
             """, unsafe_allow_html=True)
 
@@ -1695,7 +1693,7 @@ elif page == "Portfolios":
         ], columns=["Metric", pn1, pn2])
         st.dataframe(df_risk_tbl, use_container_width=True, hide_index=True)
         _csv_download(df_risk_tbl, "portfolio_risk_metrics.csv", key="dl_pf_risk")
-        st.caption(f"Sharpe and Sortino use daily excess returns over the UST constant-maturity yield matching each portfolio's benchmark maturity (source: FRED). Falls back to SOFR if the UST series is unavailable. Sortino denominator = annualised downside semi-deviation of excess returns:")
+        st.caption(f"Sharpe and Sortino use daily excess returns over the SOFR overnight rate (source: FRED). Sortino denominator = annualised downside semi-deviation of excess returns:")
         st.latex(r"\text{Sortino denominator} \;=\; \sqrt{\mathbb{E}\!\left[\min(\text{excess},\, 0)^2\right]} \cdot \sqrt{252}")
         st.latex(r"\text{Calmar} \;=\; \frac{\text{Annualised total return}}{\lvert \text{Max drawdown} \rvert}")
         st.caption("rf = 0 rows shown for reference.")
