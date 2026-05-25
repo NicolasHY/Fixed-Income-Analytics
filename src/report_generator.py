@@ -177,9 +177,20 @@ def _populate_raw_data(wb: openpyxl.Workbook, quarter: dict, p1: dict, p2: dict,
 
     COLS = ["Date", "Fund_Type", "Daily_Return", "Nav",
             "VaR_95_Estimate", "Actual_PnL", "Regime_State"]
+    # Decimal fractions (returns, VaR) must be formatted explicitly — the template
+    # has '#,##0' on E and F which rounds small decimals to 0.
+    COL_FMTS = {
+        "Date":            "yyyy-mm-dd",
+        "Daily_Return":    "0.0000%",
+        "Nav":             "#,##0.00",
+        "VaR_95_Estimate": "0.0000%",
+        "Actual_PnL":      "0.0000%",
+    }
     for r_idx, record in enumerate(rows, start=2):
         for c_idx, col in enumerate(COLS, start=1):
-            ws.cell(row=r_idx, column=c_idx).value = record[col]
+            cell = ws.cell(row=r_idx, column=c_idx, value=record[col])
+            if col in COL_FMTS:
+                cell.number_format = COL_FMTS[col]
 
     for tbl in ws.tables.values():
         if tbl.name == "tbl_RawData":
@@ -262,7 +273,7 @@ def _write_risk_summary(wb: openpyxl.Workbook, rs1: dict, rs2: dict,
     _row(4, "Cumulative Log Return (%)",   rs1["cum_log"],  rs2["cum_log"],  "0.00", alt=False)
     _row(5, "Annualised Return (%)",        rs1["ann_ret"],  rs2["ann_ret"],  "0.00", alt=True)
     _row(6, "Carry — Wtd Avg Yield (%)",   rs1["carry"],    rs2["carry"],    "0.00", alt=False)
-    _row(7, "Roll-Down Return (est. %)",   rs1["rolldown"], rs2["rolldown"], "0.00", alt=True)
+    _row(7, "Roll-Down Return (est. %)",   rs1["rolldown"], rs2["rolldown"], "0.0000", alt=True)
 
     _section(ws, 8, "RISK & RATIO METRICS", 3)
     _row(9,  "Annualised Volatility (%)",      rs1["ann_vol"],     rs2["ann_vol"],     "0.00",  alt=False)
